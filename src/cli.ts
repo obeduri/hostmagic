@@ -9,7 +9,7 @@ const program = new Command();
 program
   .name('hostmagic')
   .description('Automate local fullstack dev with .test domains, ephemeral ports, and universal OAuth 2.0 on macOS, Linux, and Windows (alias: hm)')
-  .version('1.0.0')
+  .version('1.0.2')
   .option('-H, --hostfile', 'Open the system hosts file in your default editor across macOS, Linux, and Windows')
   .option('--hostsfile', 'Alias for --hostfile')
   .option('--hosts', 'Alias for --hostfile')
