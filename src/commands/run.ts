@@ -121,8 +121,13 @@ export async function runCommand(): Promise<void> {
       }
       env.NEXT_PUBLIC_APP_URL = cleanUrl;
       env.VITE_APP_URL = cleanUrl;
-      // Zero-config OAuth bypass: NextAuth uses localhost:3000 to comply with Google Cloud Console
-      env.NEXTAUTH_URL = 'http://localhost:3000';
+      // Universal OAuth: Default auth base URLs to project domain while trusting host
+      if (!env.NEXTAUTH_URL) {
+        env.NEXTAUTH_URL = cleanUrl;
+      }
+      if (!env.AUTH_URL) {
+        env.AUTH_URL = cleanUrl;
+      }
       env.AUTH_TRUST_HOST = 'true';
     } else if (service.type === 'backend') {
       env.APP_URL = cleanUrl;

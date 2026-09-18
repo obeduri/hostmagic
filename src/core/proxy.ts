@@ -21,15 +21,10 @@ export class ReverseProxyServer {
   private projects: Map<string, ProjectRegistration> = new Map();
   private activeLocalhostTarget?: string;
   private listeningPort = 80;
-  private oauthSyncCache: Map<
-    string,
-    { cookies: string[]; targetUrl: string; originDomain: string; timestamp: number }
-  > = new Map();
   private oauthStateCache: Map<
     string,
-    { cookies: string[]; domain: string; timestamp: number }
+    { domain: string; timestamp: number }
   > = new Map();
-  private lastOAuthCookies: string[] = [];
   private lastOAuthDomain?: string;
   private lastActiveProject?: string;
 
@@ -44,128 +39,53 @@ export class ReverseProxyServer {
       this.registerProject(initialProject);
     }
 
-    // Intercept responses for OAuth URL rewriting and Session Cookie Synchronization
-    this.proxy.on('proxyRes', (proxyRes, req, res) => {
+    // Universal OAuth 2.0 Authorization URL Rewriting:
+    // If an authorization initiation redirect uses a .test or .local redirect_uri,
+    // rewrite it to http://localhost:3000 for compatibility with providers that disallow custom HTTP TLDs,
+    // and remember the origin domain in oauthStateCache.
+    this.proxy.on('proxyRes', (proxyRes, req) => {
       const rawHost = req.headers.host || '';
       const host = rawHost.split(':')[0].toLowerCase();
       const location = proxyRes.headers['location'];
 
-      // 1. Rewrite outgoing OAuth initiation redirects (e.g. accounts.google.com)
-      if (
-        location &&
-        (location.includes('accounts.google.com') ||
+      if (location) {
+        const isOAuthRedirect =
+          location.includes('redirect_uri=') ||
           location.includes('/oauth') ||
           location.includes('/authorize') ||
-          location.includes('auth'))
-      ) {
-        if (host && (host.endsWith('.test') || host.endsWith('.local') || this.routes.has(host))) {
-          this.lastOAuthDomain = host;
-        }
+          location.includes('/auth/');
 
-        const rawSetCookie = proxyRes.headers['set-cookie'];
-        if (rawSetCookie) {
-          const cookies = Array.isArray(rawSetCookie) ? rawSetCookie : [rawSetCookie];
-          this.lastOAuthCookies = cookies;
+        if (isOAuthRedirect) {
+          if (host && (host.endsWith('.test') || host.endsWith('.local') || this.routes.has(host))) {
+            this.lastOAuthDomain = host;
+          }
+
           try {
             const parsed = new URL(location);
             const state = parsed.searchParams.get('state');
-            if (state) {
+            if (state && host) {
               this.oauthStateCache.set(state, {
-                cookies,
                 domain: host,
                 timestamp: Date.now(),
               });
             }
-          } catch {}
-        }
 
-        try {
-          const parsed = new URL(location);
-          const redirectUri = parsed.searchParams.get('redirect_uri');
-          if (redirectUri && (redirectUri.includes('.test') || redirectUri.includes('.local'))) {
-            const rewrittenUri = redirectUri.replace(
-              /http:\/\/[^/]+\.(test|local)/g,
-              'http://localhost:3000'
-            );
-            parsed.searchParams.set('redirect_uri', rewrittenUri);
-            proxyRes.headers['location'] = parsed.toString();
-          }
-        } catch {
-          proxyRes.headers['location'] = location.replace(
-            /http%3A%2F%2F[^%]+?\.(test|local)/gi,
-            'http%3A%2F%2Flocalhost%3A3000'
-          );
-        }
-      }
-
-      // 2. Intercept incoming OAuth callback responses on localhost to sync session cookies
-      const isLocalhost = host === 'localhost' || host === '127.0.0.1';
-      const isOAuthCallback =
-        req.url?.includes('/api/auth/callback') ||
-        req.url?.includes('/auth/callback') ||
-        req.url?.includes('/callback');
-
-      if (isLocalhost && isOAuthCallback) {
-        let stateDomain: string | undefined;
-        try {
-          const parsedUrl = new URL(req.url || '/', 'http://localhost');
-          const state = parsedUrl.searchParams.get('state');
-          if (state && this.oauthStateCache.has(state)) {
-            stateDomain = this.oauthStateCache.get(state)!.domain;
-          }
-        } catch {}
-
-        const targetDomain = stateDomain || this.lastOAuthDomain || this.getDefaultProjectDomain();
-
-        if (targetDomain) {
-          const rawCookies = proxyRes.headers['set-cookie'];
-          if (rawCookies && rawCookies.length > 0) {
-            const syncId =
-              globalThis.crypto?.randomUUID
-                ? globalThis.crypto.randomUUID()
-                : Math.random().toString(36).slice(2);
-            let targetLocation = proxyRes.headers['location'] || '/';
-
-            // Sanitize targetLocation: if NextAuth sent http://localhost:3000/path or http://localhost/path, convert to /path
-            try {
-              const parsedLoc = new URL(targetLocation, `http://${targetDomain}`);
-              if (parsedLoc.hostname === 'localhost' || parsedLoc.hostname === '127.0.0.1') {
-                targetLocation = `${parsedLoc.pathname}${parsedLoc.search}${parsedLoc.hash}` || '/';
-              }
-            } catch {}
-
-            this.oauthSyncCache.set(syncId, {
-              cookies: Array.isArray(rawCookies) ? rawCookies : [rawCookies],
-              targetUrl: targetLocation,
-              originDomain: targetDomain,
-              timestamp: Date.now(),
-            });
-
-            // Clean up stale sync cache items older than 2 minutes
-            const now = Date.now();
-            for (const [key, item] of this.oauthSyncCache.entries()) {
-              if (now - item.timestamp > 120000) {
-                this.oauthSyncCache.delete(key);
-              }
+            const redirectUri = parsed.searchParams.get('redirect_uri');
+            if (redirectUri && (redirectUri.includes('.test') || redirectUri.includes('.local'))) {
+              const rewrittenUri = redirectUri.replace(
+                /http:\/\/[^/]+\.(test|local)/g,
+                'http://localhost:3000'
+              );
+              parsed.searchParams.set('redirect_uri', rewrittenUri);
+              proxyRes.headers['location'] = parsed.toString();
             }
-            for (const [key, item] of this.oauthStateCache.entries()) {
-              if (now - item.timestamp > 120000) {
-                this.oauthStateCache.delete(key);
-              }
+          } catch {
+            if (location.includes('.test') || location.includes('.local')) {
+              proxyRes.headers['location'] = location.replace(
+                /http%3A%2F%2F[^%]+?\.(test|local)/gi,
+                'http%3A%2F%2Flocalhost%3A3000'
+              );
             }
-
-            // Redirect browser to the target domain to install the session cookies on that origin!
-            proxyRes.headers['location'] = `http://${targetDomain}/__hostmagic_oauth_sync?syncId=${syncId}`;
-            delete proxyRes.headers['set-cookie'];
-          } else if (proxyRes.headers['location']) {
-            // Even if no cookies were set, ensure the redirect doesn't trap the user on localhost:3000!
-            let loc = proxyRes.headers['location'];
-            try {
-              const parsedLoc = new URL(loc, `http://${targetDomain}`);
-              if (parsedLoc.hostname === 'localhost' || parsedLoc.hostname === '127.0.0.1') {
-                proxyRes.headers['location'] = `http://${targetDomain}${parsedLoc.pathname}${parsedLoc.search}${parsedLoc.hash}`;
-              }
-            } catch {}
           }
         }
       }
@@ -196,6 +116,27 @@ export class ReverseProxyServer {
     this.server.on('upgrade', this.upgradeHandler);
   }
 
+  private oauthBridgeRequestHandler = async (
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> => {
+    // Universal OAuth 2.0 Bridge: Catch any request arriving at localhost:3000
+    // and seamlessly redirect to http://[target_domain].test<path><query>
+    const targetDomain = this.resolveTargetDomain(req);
+    if (targetDomain) {
+      const statusCode = req.method === 'POST' ? 307 : 302;
+      res.writeHead(statusCode, {
+        Location: `http://${targetDomain}${req.url || '/'}`,
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+      });
+      res.end();
+      return;
+    }
+
+    // Fall back to general request handler if no target domain is known
+    await this.requestHandler(req, res);
+  };
+
   private requestHandler = async (
     req: http.IncomingMessage,
     res: http.ServerResponse
@@ -214,35 +155,6 @@ export class ReverseProxyServer {
             break;
           }
         }
-      }
-    }
-
-    // 0. OAuth Session Cookie Synchronization Endpoint
-    if (url.startsWith('/__hostmagic_oauth_sync')) {
-      try {
-        const parsedUrl = new URL(url, `http://${rawHost}`);
-        const syncId = parsedUrl.searchParams.get('syncId');
-        if (syncId && this.oauthSyncCache.has(syncId)) {
-          const syncData = this.oauthSyncCache.get(syncId)!;
-          this.oauthSyncCache.delete(syncId);
-
-          // Sanitize cookies for local HTTP development:
-          // Remove '; Secure' so browser doesn't discard them over HTTP
-          // Remove '; Domain=...' so they bind directly to the current origin
-          const cleanCookies = syncData.cookies.map((c) =>
-            c.replace(/;\s*secure/gi, '').replace(/;\s*domain=[^;]+/gi, '')
-          );
-
-          res.writeHead(302, {
-            Location: syncData.targetUrl || '/',
-            'Set-Cookie': cleanCookies,
-            'Cache-Control': 'no-store',
-          });
-          res.end();
-          return;
-        }
-      } catch {
-        // Fallthrough if parsing fails
       }
     }
 
@@ -315,37 +227,25 @@ export class ReverseProxyServer {
       }
     }
 
-    // 2. Localhost & 127.0.0.1 routing (for OAuth callback on port 80 or 3000 & manual visits)
+    // 2. Localhost & 127.0.0.1 routing (for OAuth callbacks or manual visits)
     if (host === 'localhost' || host === '127.0.0.1') {
       const isOAuthCallback =
         url.includes('/api/auth/callback') ||
         url.includes('/auth/callback') ||
-        url.includes('/callback');
+        url.includes('/callback') ||
+        (url.includes('code=') && (url.includes('state=') || url.includes('scope=')));
 
+      // If an OAuth callback arrives on localhost port 80, redirect to target .test domain
       if (isOAuthCallback) {
-        // Transfer initiation cookies (state, PKCE code_verifier, CSRF) from origin to callback
-        let cookiesToInject: string[] = [];
-        try {
-          const parsedUrl = new URL(url, 'http://localhost');
-          const state = parsedUrl.searchParams.get('state');
-          if (state && this.oauthStateCache.has(state)) {
-            const cached = this.oauthStateCache.get(state)!;
-            cookiesToInject = cached.cookies;
-            this.lastOAuthDomain = cached.domain;
-          } else if (this.lastOAuthCookies.length > 0) {
-            cookiesToInject = this.lastOAuthCookies;
-          }
-        } catch {
-          if (this.lastOAuthCookies.length > 0) {
-            cookiesToInject = this.lastOAuthCookies;
-          }
-        }
-
-        if (cookiesToInject.length > 0) {
-          const existingCookie = req.headers.cookie || '';
-          const pairs = cookiesToInject.map((c) => c.split(';')[0].trim()).filter(Boolean);
-          const merged = [existingCookie, ...pairs].filter(Boolean).join('; ');
-          req.headers.cookie = merged;
+        const targetDomain = this.resolveTargetDomain(req);
+        if (targetDomain) {
+          const statusCode = req.method === 'POST' ? 307 : 302;
+          res.writeHead(statusCode, {
+            Location: `http://${targetDomain}${url}`,
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+          });
+          res.end();
+          return;
         }
       }
 
@@ -434,6 +334,81 @@ export class ReverseProxyServer {
   public registerRoute(domain: string, targetPort: number): void {
     const cleanDomain = domain.toLowerCase().trim();
     this.routes.set(cleanDomain, targetPort);
+  }
+
+  public resolveTargetDomain(req: http.IncomingMessage): string | undefined {
+    const rawUrl = req.url || '/';
+    const referer = (req.headers.referer || '').toLowerCase();
+    const origin = (req.headers.origin || '').toLowerCase();
+
+    // 0. Correlate with active OAuth flow state parameter (RFC 6749)
+    try {
+      const parsedUrl = new URL(rawUrl, 'http://localhost');
+      const state = parsedUrl.searchParams.get('state');
+      if (state && this.oauthStateCache.has(state)) {
+        const item = this.oauthStateCache.get(state)!;
+        if (Date.now() - item.timestamp < 300000) {
+          return item.domain;
+        } else {
+          this.oauthStateCache.delete(state);
+        }
+      }
+
+      // Query parameter overrides (?project=abc or ?domain=xyz)
+      const paramProj = parsedUrl.searchParams.get('project');
+      if (paramProj && this.projects.has(paramProj)) {
+        const p = this.projects.get(paramProj);
+        if (p && p.routes.length > 0) return p.routes[0].domain;
+      }
+    } catch {}
+
+    // 1. Check Referer or Origin headers
+    for (const project of this.projects.values()) {
+      for (const route of project.routes) {
+        if (
+          (referer && referer.includes(route.domain.toLowerCase())) ||
+          (origin && origin.includes(route.domain.toLowerCase()))
+        ) {
+          return route.domain;
+        }
+      }
+    }
+
+    // 2. Intuit by most recent OAuth initiation origin
+    if (this.lastOAuthDomain && this.routes.has(this.lastOAuthDomain.toLowerCase())) {
+      return this.lastOAuthDomain;
+    }
+
+    // 3. Intuit by explicitly selected project or cookie target
+    const cookieHeader = req.headers.cookie || '';
+    const match = cookieHeader.match(/hostmagic_target=([^;]+)/);
+    const cookieTarget = match ? match[1].trim() : undefined;
+    const targetProjectName = cookieTarget || this.activeLocalhostTarget;
+    if (targetProjectName && this.projects.has(targetProjectName)) {
+      const p = this.projects.get(targetProjectName);
+      if (p) {
+        if (p.frontendPort) {
+          const route = p.routes.find((r) => r.targetPort === p.frontendPort);
+          if (route) return route.domain;
+        }
+        if (p.routes.length > 0) return p.routes[0].domain;
+      }
+    }
+
+    // 4. Intuit by most recently active project browsed by developer
+    if (this.lastActiveProject && this.projects.has(this.lastActiveProject)) {
+      const p = this.projects.get(this.lastActiveProject);
+      if (p) {
+        if (p.frontendPort) {
+          const route = p.routes.find((r) => r.targetPort === p.frontendPort);
+          if (route) return route.domain;
+        }
+        if (p.routes.length > 0) return p.routes[0].domain;
+      }
+    }
+
+    // 5. Default single active project domain
+    return this.getDefaultProjectDomain();
   }
 
   private resolveLocalhostTarget(req: http.IncomingMessage): number | undefined {
@@ -656,7 +631,7 @@ export class ReverseProxyServer {
 
     // 2. Start auxiliary OAuth Callback Bridge (default: port 3000) to catch localhost:3000 redirects
     if (oauthPort && oauthPort !== port) {
-      this.oauthBridgeServer = http.createServer(this.requestHandler);
+      this.oauthBridgeServer = http.createServer(this.oauthBridgeRequestHandler);
       this.oauthBridgeServer.on('upgrade', this.upgradeHandler);
 
       await new Promise<void>((resolve) => {
