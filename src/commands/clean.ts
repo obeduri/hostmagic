@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
-import { clearHostsBlock } from '../core/hosts.js';
+import { clearHostsBlock, isElevated } from '../core/hosts.js';
 import type { HostmagicConfig } from '../types.js';
 
 export interface CleanOptions {
@@ -50,21 +50,40 @@ export async function cleanCommand(options: CleanOptions): Promise<void> {
     }
   }
 
-  const spinner = p.spinner();
   const targetDesc = options.all
     ? 'all Hostmagic entries'
     : projectName
     ? `entries for [${projectName}]`
     : 'default Hostmagic entries';
 
-  spinner.start(`Removing ${targetDesc} from system hosts file (UAC elevation may appear in Windows)...`);
+  const elevated = await isElevated();
+  const isWindows = process.platform === 'win32';
+
+  if (!elevated && !isWindows) {
+    p.log.info(
+      pc.cyan('Elevated permissions required to modify /etc/hosts. Sudo password prompt will appear below:')
+    );
+  }
+
+  let spinner: any;
+  if (elevated || isWindows) {
+    spinner = p.spinner();
+    const elevationMsg = isWindows && !elevated ? ' (UAC elevation dialog will appear)...' : '...';
+    spinner.start(`Removing ${targetDesc} from system hosts file${elevationMsg}`);
+  }
 
   try {
     await clearHostsBlock(projectName);
-    spinner.stop(`Successfully cleaned ${targetDesc} from hosts file.`);
+    if (spinner) {
+      spinner.stop(`Successfully cleaned ${targetDesc} from hosts file.`);
+    } else {
+      p.log.success(`Successfully cleaned ${targetDesc} from hosts file.`);
+    }
     p.outro(pc.green('✨ Hosts file is clean and DNS cache has been flushed.'));
   } catch (err: any) {
-    spinner.stop(pc.red('Failed to clean hosts file.'));
+    if (spinner) {
+      spinner.stop(pc.red('Failed to clean hosts file.'));
+    }
     p.log.error(err.message || String(err));
     process.exit(1);
   }

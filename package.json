@@ -5,7 +5,8 @@
   "type": "module",
   "main": "dist/cli.js",
   "bin": {
-    "hostmagic": "./dist/cli.js"
+    "hostmagic": "./dist/cli.js",
+    "hm": "./dist/cli.js"
   },
   "files": [
     "dist"
@@ -14,7 +15,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "test": "bun test/core.test.ts && bun test/detector.test.ts && bun test/proxy.test.ts",
+    "test": "bun test/core.test.ts && bun test/detector.test.ts && bun test/proxy.test.ts && bun test/killer.test.ts && bun test/platform.test.ts",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -40,6 +41,7 @@
   "devDependencies": {
     "@types/http-proxy": "^1.17.17",
     "@types/node": "^22.5.5",
+    "selfsigned": "^5.5.0",
     "tsup": "^8.3.0",
     "typescript": "^5.6.2"
   }

@@ -1,13 +1,9 @@
+import path from 'node:path';
+import readline from 'node:readline';
 import { execa, type ResultPromise } from 'execa';
 import pc from 'picocolors';
-import kill from 'tree-kill';
+import { terminateProcess } from './port-killer.js';
 import type { ServiceRuntimeInfo } from '../types.js';
-
-function killTree(pid: number, signal: string = 'SIGKILL'): Promise<void> {
-  return new Promise((resolve) => {
-    kill(pid, signal, () => resolve());
-  });
-}
 
 interface RunningProcess {
   name: string;
@@ -32,6 +28,16 @@ export class ProcessManager {
     const handleSignal = async (signal: string) => {
       if (this.isShuttingDown) return;
       this.isShuttingDown = true;
+
+      if (process.stdin.isTTY) {
+        try {
+          process.stdin.setRawMode(false);
+          process.stdin.pause();
+        } catch {
+          // Ignored
+        }
+      }
+
       console.log(`\n${pc.yellow(`Received ${signal}, stopping all services cleanly...`)}`);
       await this.stopAll();
       process.exit(0);
@@ -40,6 +46,25 @@ export class ProcessManager {
     process.on('SIGINT', () => handleSignal('SIGINT'));
     process.on('SIGTERM', () => handleSignal('SIGTERM'));
     process.on('SIGHUP', () => handleSignal('SIGHUP'));
+
+    // Listen for ESC key in interactive terminals
+    if (process.stdin.isTTY) {
+      readline.emitKeypressEvents(process.stdin);
+      try {
+        process.stdin.setRawMode(true);
+        process.stdin.resume();
+
+        process.stdin.on('keypress', (_str, key) => {
+          if (key.name === 'escape') {
+            handleSignal('ESC');
+          } else if (key.ctrl && key.name === 'c') {
+            handleSignal('SIGINT');
+          }
+        });
+      } catch {
+        // Ignored if raw mode is not supported in current environment
+      }
+    }
   }
 
   private getPrefix(serviceType: string, name: string): string {
@@ -91,7 +116,7 @@ export class ProcessManager {
     const file = parts[0];
     const args = parts.slice(1);
 
-    const fullCwd = `${rootDir}/${info.service.path}`.replace(/\\/g, '/');
+    const fullCwd = path.resolve(rootDir, info.service.path);
 
     const subprocess = execa(file, args, {
       cwd: fullCwd,
@@ -129,8 +154,8 @@ export class ProcessManager {
     const killPromises = this.processes.map(async (proc) => {
       if (proc.pid) {
         try {
-          // Send SIGKILL/SIGTERM to the entire process tree
-          await killTree(proc.pid, 'SIGKILL');
+          // Send SIGKILL/taskkill to the entire process tree
+          await terminateProcess(proc.pid);
         } catch {
           // If already stopped, ignore error
         }

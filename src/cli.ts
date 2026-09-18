@@ -2,19 +2,37 @@ import { Command } from 'commander';
 import { initCommand } from './commands/init.js';
 import { runCommand } from './commands/run.js';
 import { cleanCommand } from './commands/clean.js';
+import { hostfileCommand } from './commands/hostfile.js';
 
 const program = new Command();
 
 program
   .name('hostmagic')
-  .description('Automate local fullstack dev with .local domains, random ephemeral ports, and concurrent execution')
-  .version('1.0.0');
+  .description('Automate local fullstack dev with .local domains, random ephemeral ports, and concurrent execution (alias: hm)')
+  .version('1.0.0')
+  .option('-H, --hostfile', 'Open the system hosts file in your default editor')
+  .option('--hostsfile', 'Alias for --hostfile')
+  .option('--hosts', 'Alias for --hostfile')
+  .option('-e, --editor <editor>', 'Custom editor to open the hosts file with')
+  .action(async (options) => {
+    if (options.hostfile || options.hostsfile || options.hosts) {
+      try {
+        await hostfileCommand({ editor: options.editor });
+      } catch (err: any) {
+        console.error(err.message || err);
+        process.exit(1);
+      }
+      return;
+    }
+    program.help();
+  });
 
 program
   .command('init')
   .description('Initialize Hostmagic in the current directory and configure local hosts')
   .option('-y, --yes', 'Skip interactive prompts and use defaults')
   .option('-n, --name <name>', 'Custom project name for domains')
+  .option('-t, --tld <tld>', 'Custom top-level domain or suffix (default: "local", e.g. "localtest.me")')
   .action(async (options) => {
     try {
       await initCommand(options);
@@ -26,6 +44,8 @@ program
 
 program
   .command('run')
+  .alias('dev')
+  .alias('start')
   .description('Allocate dynamic ephemeral ports and run all configured services concurrently')
   .action(async () => {
     try {
@@ -50,4 +70,20 @@ program
     }
   });
 
+program
+  .command('hostfile')
+  .alias('hosts')
+  .alias('hostsfile')
+  .description('Open the system hosts file in your default editor')
+  .option('-e, --editor <editor>', 'Custom editor to open the hosts file with')
+  .action(async (options) => {
+    try {
+      await hostfileCommand(options);
+    } catch (err: any) {
+      console.error(err.message || err);
+      process.exit(1);
+    }
+  });
+
 program.parse(process.argv);
+

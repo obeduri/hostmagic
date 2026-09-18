@@ -76,7 +76,8 @@ export async function analyzeDirectory(
   fullPath: string,
   relativePath: string,
   projectName: string,
-  rootDir: string
+  rootDir: string,
+  tld: string = 'local'
 ): Promise<DetectedService | null> {
   const pkgPath = path.join(fullPath, 'package.json');
   if (!existsSync(pkgPath)) {
@@ -136,15 +137,15 @@ export async function analyzeDirectory(
     detectedCommand = 'pnpm dev';
   }
 
-  // Domain assignment according to PRD
+  // Domain assignment according to PRD / config
   let suggestedDomain: string;
   if (type === 'frontend') {
-    suggestedDomain = `${projectName}.local`;
+    suggestedDomain = `${projectName}.${tld}`;
   } else if (type === 'backend') {
-    suggestedDomain = `backend.${projectName}.local`;
+    suggestedDomain = `backend.${projectName}.${tld}`;
   } else {
     const safeName = path.basename(relativePath).replace(/[^a-zA-Z0-9-]/g, '-');
-    suggestedDomain = `${safeName}.${projectName}.local`;
+    suggestedDomain = `${safeName}.${projectName}.${tld}`;
   }
 
   const serviceName = path.basename(relativePath);
@@ -162,13 +163,17 @@ export async function analyzeDirectory(
 /**
  * Scans candidate subdirectories and returns detected services.
  */
-export async function detectServices(rootDir: string, projectName: string): Promise<DetectedService[]> {
+export async function detectServices(
+  rootDir: string,
+  projectName: string,
+  tld: string = 'local'
+): Promise<DetectedService[]> {
   const detected: DetectedService[] = [];
 
   for (const candidate of CANDIDATE_DIRS) {
     const fullPath = path.resolve(rootDir, candidate);
     if (existsSync(fullPath)) {
-      const service = await analyzeDirectory(fullPath, candidate, projectName, rootDir);
+      const service = await analyzeDirectory(fullPath, candidate, projectName, rootDir, tld);
       if (service) {
         detected.push(service);
       }

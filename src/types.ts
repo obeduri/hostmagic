@@ -7,6 +7,7 @@ export interface ServiceConfig {
   domain: string;
   command: string;
   portEnvVar?: string;
+  port?: number;
   customEnv?: Record<string, string>;
 }
 
