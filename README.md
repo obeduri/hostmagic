@@ -70,14 +70,16 @@
 
 ### Step 1: Installation & Setup
 
-Run Hostmagic instantly with `npx`, install it globally, or link it locally from source:
+Run Hostmagic instantly with `npx`, install it globally, or link it locally from source across any operating system:
 
 ```bash
-# Option A: Run directly with npx
+# Option A: Run directly with npx (Windows, macOS, Linux)
 npx hostmagic init
 
 # Option B: Install globally via npm (provides both `hostmagic` and `hm`)
 npm install -g hostmagic
+# Note for macOS/Linux users installing into global system paths:
+# sudo npm install -g hostmagic
 
 # Option C: Link locally from source
 git clone https://github.com/hostmagic/hostmagic.git
@@ -102,11 +104,11 @@ hm init
 2. **Scans & classifies services:** Detects `frontend/`, `backend/`, `apps/web/`, `apps/api/`, etc., and reads `package.json` to identify Next.js, Vite, Astro, NestJS, Express, etc.
 3. **Assigns clean domains:** Configures `http://my-app.test` and `http://backend.my-app.test`.
 4. **Saves configuration:** Writes `.hostmagic.json` in your project root.
-5. **Updates system `hosts`:**
-   - **Windows:** Triggers a native PowerShell UAC elevation prompt automatically (click **Yes**).
-   - **macOS / Linux:** Prompts for `sudo` to securely update `/etc/hosts`.
-   - Writes entries inside isolated `# BEGIN hostmagic:<project>` blocks.
-   - Flushes system DNS cache.
+5. **Updates system `hosts` across platforms:**
+   - 🪟 **Windows:** Triggers a native PowerShell UAC elevation prompt automatically (click **Yes**).
+   - 🍎 **macOS:** Prompts for `sudo` to securely update `/etc/hosts` and flushes mDNS resolver cache (`dscacheutil` & `mDNSResponder`).
+   - 🐧 **Linux:** Prompts for `sudo` to update `/etc/hosts` and flushes `systemd-resolved` / `resolvectl` caches.
+   - Writes entries inside isolated `# BEGIN hostmagic:<project>` blocks without touching existing entries.
 
 **CLI Options:**
 - `-y, --yes`: Accept all detected defaults without interactive prompts.
@@ -120,17 +122,27 @@ hm init
 Start all services and the local reverse proxy with a single command:
 
 ```bash
+# Windows
 hm dev
-# or: hostmagic dev, hostmagic run, hm start
+
+# macOS (binding port 80 requires privileged access)
+sudo hm dev
+
+# Linux (run with sudo or with setcap capability)
+sudo hm dev
+# Or if setcap was configured: hm dev
 ```
+
+*(Aliases: `hostmagic dev`, `hostmagic run`, `hm start`)*
 
 #### What happens at startup:
 1. **Starts Port 80 Reverse Proxy:** Intercepts traffic on port 80 and maps requests to internal service ports based on the `Host` HTTP header.
-2. **Allocates Ephemeral Ports:** Assigns random available ports internally to each child process without conflicts.
-3. **Injects In-Memory Variables:** Injects clean URLs without modifying your physical `.env` files:
+2. **Starts Port 3000 OAuth Bridge:** Intercepts any OAuth 2.0 callbacks on `localhost:3000` and bounces them directly to your `.test` domain.
+3. **Allocates Ephemeral Ports:** Assigns random available ports internally to each child process without conflicts.
+4. **Injects In-Memory Variables:** Injects clean URLs without modifying your physical `.env` files:
    - **Frontend:** `PORT`, `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_API_URL`, `VITE_API_URL`
    - **Backend:** `PORT`, `APP_URL`, `FRONTEND_URL`, `CORS_ORIGIN`
-4. **Displays Interactive Banner:**
+5. **Displays Interactive Banner:**
    ```text
    ┌────────────────────────────────────────────────────────────────┐
    │  🚀 Hostmagic is running clean domains for [my-app]            │
@@ -142,7 +154,7 @@ hm dev
    │  Press Ctrl+C at any time to gracefully stop all services.     │
    └────────────────────────────────────────────────────────────────┘
    ```
-5. **Streams Prefixed Logs:** Displays concurrent output with `[FRONT]` (Cyan) and `[BACK]` (Magenta) tags.
+6. **Streams Prefixed Logs:** Displays concurrent output with `[FRONT]` (Cyan) and `[BACK]` (Magenta) tags.
 
 ---
 
@@ -152,7 +164,7 @@ Open your browser and navigate directly to:
 - **Frontend Application:** `http://my-app.test`
 - **Backend API:** `http://backend.my-app.test`
 
-**No port numbers required!** Full WebSocket proxying is enabled, meaning Hot Module Replacement (HMR) in Vite, Next.js, and Astro works seamlessly out of the box.
+**No port numbers required!** Full WebSocket proxying is enabled, meaning Hot Module Replacement (HMR) in Vite, Next.js, and Astro works seamlessly out of the box across Chrome, Safari, Firefox, Edge, Arc, and Brave on macOS, Linux, and Windows.
 
 ---
 
@@ -160,7 +172,7 @@ Open your browser and navigate directly to:
 
 To stop all running services cleanly:
 - Press **`ESC`** or **`Ctrl + C`** in your terminal.
-- Hostmagic captures the signal/keypress and executes a cascading process tree kill (`tree-kill`), terminating all sub-processes (Bun, Node, Vite) and freeing sockets immediately without leaving zombie background tasks.
+- Hostmagic captures the signal/keypress and executes a cross-platform process tree kill (`tree-kill` issuing `SIGINT`/`SIGTERM`/`SIGKILL` on Unix and `taskkill /F /T` on Windows), terminating all sub-processes (Bun, Node, Vite) and freeing sockets immediately without leaving zombie background tasks.
 
 ---
 
@@ -169,10 +181,13 @@ To stop all running services cleanly:
 To remove domain entries from your operating system's `hosts` file:
 
 ```bash
-# Clean entries for the current project
+# Windows
 hm clean
 
-# Clean all Hostmagic entries across all projects (prompts for confirmation)
+# macOS & Linux (prompts for sudo if not already elevated)
+sudo hm clean
+
+# Clean all Hostmagic entries across all projects
 hm clean --all
 
 # Clean all entries without interactive confirmation prompt
@@ -186,13 +201,17 @@ hm clean --all --yes
 Instantly open your operating system's `hosts` file across **Windows**, **macOS**, and **Linux** in your default or preferred editor:
 
 ```bash
-# Open using default system editor (Notepad on Windows, TextEdit on macOS, xdg-open/nano on Linux)
+# Open using default system editor:
+# • Windows -> Notepad
+# • macOS   -> Default Text Editor (TextEdit via `open -t`)
+# • Linux   -> GUI Default (via `xdg-open`) or terminal editor (nano, vim)
 hm --hostfile
 # or: hostmagic --hostfile, hm -H, hm hostfile, hm hosts
 
-# Open with a specific custom editor (e.g. VS Code, Cursor, nano)
+# Open with a specific custom editor across any OS (e.g. VS Code, Cursor, nano)
 hm hostfile --editor code
 hm --hostfile -e cursor
+hm --hostfile -e nano
 ```
 
 ---
@@ -399,7 +418,13 @@ Hostmagic automatically flushes your operating system's DNS cache whenever `host
 **Yes.** Windows restricts modification of `C:\Windows\System32\drivers\etc\hosts` to Administrators. Hostmagic invokes PowerShell's `Start-Process -Verb RunAs` so you don't need to manually run an Administrator terminal.
 
 ### Q: What if port 80 is already in use?
-If another server (such as IIS, Apache, or Skype) occupies port 80, `hostmagic run` will notify you with a clear error message. You can stop the conflicting service or disable IIS World Wide Web Publishing Service in Windows Services (`services.msc`).
+If another server occupies port 80, Hostmagic notifies you with a clear error message:
+- 🍎 **macOS:** Check what is listening on port 80 with `sudo lsof -i :80`. If macOS's built-in Apache service is running, stop it with `sudo apachectl stop`.
+- 🐧 **Linux:** Check active listeners with `sudo lsof -i :80` or `sudo fuser 80/tcp`. If Nginx or Apache is active, stop them with `sudo systemctl stop nginx` or `sudo systemctl stop apache2`.
+- 🪟 **Windows:** If IIS or Skype occupies port 80, stop the conflicting service or disable the IIS World Wide Web Publishing Service in Windows Services (`services.msc`).
+
+### Q: Can I use Hostmagic inside WSL2 (Windows Subsystem for Linux)?
+**Yes!** Inside WSL2, Hostmagic runs under the Linux subsystem, updating `/etc/hosts` and binding port 80 within WSL. Because modern WSL2 shares localhost networking with Windows, you can access your clean `.test` domains directly from your Windows web browser.
 
 ### Q: Do I need to edit my `.env` files?
 **No.** Hostmagic injects `NEXT_PUBLIC_API_URL`, `FRONTEND_URL`, and other variables directly into the running process's memory. Your physical `.env` files remain untouched.

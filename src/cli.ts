@@ -8,9 +8,9 @@ const program = new Command();
 
 program
   .name('hostmagic')
-  .description('Automate local fullstack dev with .test domains, random ephemeral ports, and concurrent execution (alias: hm)')
+  .description('Automate local fullstack dev with .test domains, ephemeral ports, and universal OAuth 2.0 on macOS, Linux, and Windows (alias: hm)')
   .version('1.0.0')
-  .option('-H, --hostfile', 'Open the system hosts file in your default editor')
+  .option('-H, --hostfile', 'Open the system hosts file in your default editor across macOS, Linux, and Windows')
   .option('--hostsfile', 'Alias for --hostfile')
   .option('--hosts', 'Alias for --hostfile')
   .option('-e, --editor <editor>', 'Custom editor to open the hosts file with')

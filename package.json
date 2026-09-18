@@ -1,7 +1,7 @@
 {
   "name": "hostmagic",
   "version": "1.0.2",
-  "description": "Automate local fullstack dev with .test domains, random ephemeral ports, and concurrent execution",
+  "description": "Automate local fullstack dev with .test domains, ephemeral ports, and universal OAuth 2.0 across macOS, Linux, and Windows",
   "type": "module",
   "main": "dist/cli.js",
   "bin": {
@@ -25,7 +25,12 @@
     "local-domains",
     "development",
     "concurrent",
-    "ports"
+    "ports",
+    "oauth2",
+    "macos",
+    "linux",
+    "windows",
+    "cross-platform"
   ],
   "author": "Obed David Pérez Uri <enobe220@gmail.com>",
   "license": "MIT",
