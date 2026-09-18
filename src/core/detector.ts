@@ -77,7 +77,7 @@ export async function analyzeDirectory(
   relativePath: string,
   projectName: string,
   rootDir: string,
-  tld: string = 'local'
+  tld: string = 'test'
 ): Promise<DetectedService | null> {
   const pkgPath = path.join(fullPath, 'package.json');
   if (!existsSync(pkgPath)) {
@@ -166,7 +166,7 @@ export async function analyzeDirectory(
 export async function detectServices(
   rootDir: string,
   projectName: string,
-  tld: string = 'local'
+  tld: string = 'test'
 ): Promise<DetectedService[]> {
   const detected: DetectedService[] = [];
 

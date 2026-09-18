@@ -1,7 +1,7 @@
 {
   "name": "hostmagic",
   "version": "1.0.0",
-  "description": "Automate local fullstack dev with .local domains, random ephemeral ports, and concurrent execution",
+  "description": "Automate local fullstack dev with .test domains, random ephemeral ports, and concurrent execution",
   "type": "module",
   "main": "dist/cli.js",
   "bin": {

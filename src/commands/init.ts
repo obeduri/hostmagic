@@ -23,7 +23,7 @@ interface InitOptions {
 export async function initCommand(options: InitOptions): Promise<void> {
   const rootDir = process.cwd();
   const folderName = path.basename(rootDir).toLowerCase().replace(/[^a-z0-9-]/g, '-');
-  const tld = options.tld || 'local';
+  const tld = options.tld || 'test';
 
   p.intro(`${pc.bgMagenta(pc.bold(' 🧙‍♂️ Hostmagic Init '))}`);
 
@@ -41,7 +41,7 @@ export async function initCommand(options: InitOptions): Promise<void> {
   let projectName = options.name || existingConfig?.name || folderName;
   if (!options.yes) {
     const response = await p.text({
-      message: 'Project name (will be used for local domains):',
+      message: `Project name (will be used for .${tld} domains):`,
       defaultValue: projectName,
       placeholder: projectName,
       validate(val) {

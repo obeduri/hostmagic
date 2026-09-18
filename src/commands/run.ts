@@ -62,7 +62,7 @@ export async function runCommand(): Promise<void> {
     }
   }
 
-  console.log(pc.cyan(`\n🪄 Configuring clean .local domains for ${config.name}...`));
+  console.log(pc.cyan(`\n🪄 Configuring clean .${config.tld || 'test'} domains for ${config.name}...`));
 
   // Check if an existing Hostmagic Gateway is already running on port 80
   const isGatewayActive = await ReverseProxyServer.isGatewayRunning(80);

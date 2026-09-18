@@ -46,16 +46,16 @@ export class ReverseProxyServer {
 
       // 1. Rewrite outgoing OAuth initiation redirects (e.g. accounts.google.com)
       if (location && (location.includes('accounts.google.com') || location.includes('/oauth'))) {
-        if (host && host.endsWith('.local')) {
+        if (host && (host.endsWith('.test') || host.endsWith('.local'))) {
           this.lastOAuthDomain = host;
         }
 
         try {
           const parsed = new URL(location);
           const redirectUri = parsed.searchParams.get('redirect_uri');
-          if (redirectUri && redirectUri.includes('.local')) {
+          if (redirectUri && (redirectUri.includes('.test') || redirectUri.includes('.local'))) {
             const rewrittenUri = redirectUri.replace(
-              /http:\/\/[^/]+\.local/g,
+              /http:\/\/[^/]+\.(test|local)/g,
               'http://localhost:3000'
             );
             parsed.searchParams.set('redirect_uri', rewrittenUri);
@@ -63,7 +63,7 @@ export class ReverseProxyServer {
           }
         } catch {
           proxyRes.headers['location'] = location.replace(
-            /http%3A%2F%2F[^%]+?\.local/gi,
+            /http%3A%2F%2F[^%]+?\.(test|local)/gi,
             'http%3A%2F%2Flocalhost%3A3000'
           );
         }
@@ -98,7 +98,7 @@ export class ReverseProxyServer {
               }
             }
 
-            // Redirect browser to the .local domain to install the session cookies on that origin!
+            // Redirect browser to the target domain to install the session cookies on that origin!
             proxyRes.headers['location'] = `http://${targetDomain}/__hostmagic_oauth_sync?syncId=${syncId}`;
             delete proxyRes.headers['set-cookie'];
           }
@@ -143,7 +143,7 @@ export class ReverseProxyServer {
 
             // Sanitize cookies for local HTTP development:
             // Remove '; Secure' so browser doesn't discard them over HTTP
-            // Remove '; Domain=...' so they bind directly to the current .local origin
+            // Remove '; Domain=...' so they bind directly to the current origin
             const cleanCookies = syncData.cookies.map((c) =>
               c.replace(/;\s*secure/gi, '').replace(/;\s*domain=[^;]+/gi, '')
             );
@@ -244,7 +244,7 @@ export class ReverseProxyServer {
         return;
       }
 
-      // 3. Domain-specific routing (e.g. abogando.local, api.abogando.local)
+      // 3. Domain-specific routing (e.g. abogando.test, api.abogando.test)
       const targetPort = this.routes.get(host);
       if (targetPort) {
         // Automatically track the project the developer is actively browsing
@@ -343,7 +343,7 @@ export class ReverseProxyServer {
       // Ignored
     }
 
-    // 1. Intuit by Referer / Origin header (from which .local domain the user clicked / redirected)
+    // 1. Intuit by Referer / Origin header (from which domain the user clicked / redirected)
     for (const project of this.projects.values()) {
       for (const route of project.routes) {
         if (

@@ -8,7 +8,7 @@ const program = new Command();
 
 program
   .name('hostmagic')
-  .description('Automate local fullstack dev with .local domains, random ephemeral ports, and concurrent execution (alias: hm)')
+  .description('Automate local fullstack dev with .test domains, random ephemeral ports, and concurrent execution (alias: hm)')
   .version('1.0.0')
   .option('-H, --hostfile', 'Open the system hosts file in your default editor')
   .option('--hostsfile', 'Alias for --hostfile')
@@ -32,7 +32,7 @@ program
   .description('Initialize Hostmagic in the current directory and configure local hosts')
   .option('-y, --yes', 'Skip interactive prompts and use defaults')
   .option('-n, --name <name>', 'Custom project name for domains')
-  .option('-t, --tld <tld>', 'Custom top-level domain or suffix (default: "local", e.g. "localtest.me")')
+  .option('-t, --tld <tld>', 'Custom top-level domain or suffix (default: "test", e.g. "localtest.me")')
   .action(async (options) => {
     try {
       await initCommand(options);

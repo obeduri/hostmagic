@@ -1,11 +1,11 @@
 # 🧙‍♂️ Hostmagic
 
-> Automate local fullstack development with clean `.local` domains, zero-conflict ephemeral ports, and concurrent service execution.
+> Automate local fullstack development with clean `.test` domains, zero-conflict ephemeral ports, and concurrent service execution.
 
 [![npm version](https://img.shields.io/npm/v/hostmagic.svg)](https://www.npmjs.com/package/hostmagic)
 [![License: MIT](https://img.shields.io/badge/License-MIT-magenta.svg)](https://opensource.org/licenses/MIT)
 
-**Hostmagic** is a developer CLI tool built with Node.js and TypeScript that eliminates the everyday friction of local fullstack development. It automatically detects your frontend and backend services, configures system `.local` domain names (with seamless Windows UAC elevation and Unix `sudo`), assigns dynamic random ports at runtime, and launches your services concurrently with clear, prefixed logs.
+**Hostmagic** is a developer CLI tool built with Node.js and TypeScript that eliminates the everyday friction of local fullstack development. It automatically detects your frontend and backend services, configures system `.test` domain names (with seamless Windows UAC elevation and Unix `sudo`), assigns dynamic random ports at runtime, and launches your services concurrently with clear, prefixed logs.
 
 > 💡 **Tip:** You can use either `hostmagic` or the shorthand **`hm`** alias for all commands (e.g. `hm init`, `hm dev`, `hm clean`, `hm --hostfile`).
 
@@ -13,7 +13,7 @@
 
 ## ⚡ Key Features
 
-- 🌐 **Clean `.local` Domains (No Ports!):** Say goodbye to confusing `localhost:3000` and ports at the end of URLs. Your apps run directly on intuitive addresses like `http://my-app.local` and `http://backend.my-app.local`.
+- 🌐 **Clean `.test` Domains (No Ports!):** Say goodbye to confusing `localhost:3000` and ports at the end of URLs. Your apps run directly on intuitive addresses like `http://my-app.test` and `http://backend.my-app.test`.
 - ⚡ **Built-in Port 80 Reverse Proxy:** Transparently routes incoming HTTP traffic and WebSockets (for HMR with Vite, Next.js, and Astro) from port 80 to your services' internal ephemeral ports.
 - 🛡️ **Non-Destructive & Namespaced `hosts` Management:** Safely inserts and updates system `hosts` entries inside isolated `# BEGIN hostmagic:<project>` blocks without corrupting existing entries.
 - 🪟 **Automatic Windows UAC Elevation:** Running without administrative rights in Windows? Hostmagic triggers a native PowerShell UAC elevation prompt automatically without forcing you to restart your terminal as Administrator.
@@ -88,7 +88,7 @@ hm init
 #### What the interactive wizard does:
 1. **Confirms project name:** Defaults to your folder name (e.g. `my-app`).
 2. **Scans & classifies services:** Detects `frontend/`, `backend/`, `apps/web/`, `apps/api/`, etc., and reads `package.json` to identify Next.js, Vite, Astro, NestJS, Express, etc.
-3. **Assigns clean domains:** Configures `http://my-app.local` and `http://backend.my-app.local`.
+3. **Assigns clean domains:** Configures `http://my-app.test` and `http://backend.my-app.test`.
 4. **Saves configuration:** Writes `.hostmagic.json` in your project root.
 5. **Updates system `hosts`:**
    - **Windows:** Triggers a native PowerShell UAC elevation prompt automatically (click **Yes**).
@@ -99,7 +99,7 @@ hm init
 **CLI Options:**
 - `-y, --yes`: Accept all detected defaults without interactive prompts.
 - `-n, --name <name>`: Provide a custom project name for domain resolution.
-- `-t, --tld <tld>`: Custom top-level domain suffix (default: `"local"`, e.g. `"localtest.me"`).
+- `-t, --tld <tld>`: Custom top-level domain suffix (default: `"test"`, e.g. `"localtest.me"`).
 
 ---
 
@@ -123,8 +123,8 @@ hm dev
    ┌────────────────────────────────────────────────────────────────┐
    │  🚀 Hostmagic is running clean domains for [my-app]            │
    ├────────────────────────────────────────────────────────────────┤
-   │  • [FRONTEND] frontend: http://my-app.local                    │
-   │  • [BACKEND]  backend:  http://backend.my-app.local            │
+   │  • [FRONTEND] frontend: http://my-app.test                     │
+   │  • [BACKEND]  backend:  http://backend.my-app.test             │
    ├────────────────────────────────────────────────────────────────┤
    │  ⚡ Port 80 Reverse Proxy active (no port numbers needed in browser) │
    │  Press Ctrl+C at any time to gracefully stop all services.     │
@@ -137,8 +137,8 @@ hm dev
 ### Step 4: Browser Access & Hot Reloading
 
 Open your browser and navigate directly to:
-- **Frontend Application:** `http://my-app.local`
-- **Backend API:** `http://backend.my-app.local`
+- **Frontend Application:** `http://my-app.test`
+- **Backend API:** `http://backend.my-app.test`
 
 **No port numbers required!** Full WebSocket proxying is enabled, meaning Hot Module Replacement (HMR) in Vite, Next.js, and Astro works seamlessly out of the box.
 
@@ -247,7 +247,7 @@ EOF
 hm init
 hm dev
 ```
-Open `http://hostmagic-demo.local` and `http://backend.hostmagic-demo.local` in your browser!
+Open `http://hostmagic-demo.test` and `http://backend.hostmagic-demo.test` in your browser!
 
 ---
 
@@ -257,20 +257,20 @@ Open `http://hostmagic-demo.local` and `http://backend.hostmagic-demo.local` in 
 {
   "$schema": "https://raw.githubusercontent.com/hostmagic/cli/main/schema.json",
   "name": "my-app",
-  "tld": "local",
+  "tld": "test",
   "services": [
     {
       "name": "frontend",
       "path": "frontend",
       "type": "frontend",
-      "domain": "my-app.local",
+      "domain": "my-app.test",
       "command": "npm run dev"
     },
     {
       "name": "backend",
       "path": "backend",
       "type": "backend",
-      "domain": "backend.my-app.local",
+      "domain": "backend.my-app.test",
       "command": "npm run dev"
     }
   ]
@@ -294,7 +294,7 @@ Hostmagic will honor these fixed ports if available.
 
 ## 🔐 Google OAuth & Third-Party Authentication
 
-Google Cloud Console strictly forbids `.local` domains and non-public TLDs (*"Invalid Origin: must end with a public top-level domain"*). The only HTTP origin exception allowed by Google OAuth is `localhost`.
+Google Cloud Console strictly forbids `.test` domains and non-public TLDs (*"Invalid Origin: must end with a public top-level domain"*). The only HTTP origin exception allowed by Google OAuth is `localhost`.
 
 Hostmagic solves this natively: the port 80 Reverse Proxy automatically intercepts requests to `http://localhost` and `http://127.0.0.1` and routes them directly to your Frontend!
 
@@ -305,7 +305,7 @@ Set your OAuth client once and for all without worrying about changing dynamic p
 - **Authorized redirect URIs:**
   `http://localhost/api/auth/callback/google` (or your framework's callback route, e.g. NextAuth/Auth.js)
 
-Your app remains accessible at `http://<name>.local` for clean local development, while OAuth callbacks route smoothly through `http://localhost`.
+Your app remains accessible at `http://<name>.test` for clean local development, while OAuth callbacks route smoothly through `http://localhost`.
 
 ---
 
@@ -316,13 +316,13 @@ Hostmagic injects these environment variables in-memory for each service at runt
 | Target Service | Variable Name | Example Value | Description |
 | :--- | :--- | :--- | :--- |
 | **Frontend** | `PORT` | `54321` | Internal ephemeral port (handled by Reverse Proxy) |
-| **Frontend** | `NEXT_PUBLIC_APP_URL` | `http://my-app.local` | Clean frontend base URL (no port) |
-| **Frontend** | `NEXT_PUBLIC_API_URL` | `http://backend.my-app.local` | Clean backend API URL for Next.js (no port) |
-| **Frontend** | `VITE_API_URL` | `http://backend.my-app.local` | Clean backend API URL for Vite (no port) |
+| **Frontend** | `NEXT_PUBLIC_APP_URL` | `http://my-app.test` | Clean frontend base URL (no port) |
+| **Frontend** | `NEXT_PUBLIC_API_URL` | `http://backend.my-app.test` | Clean backend API URL for Next.js (no port) |
+| **Frontend** | `VITE_API_URL` | `http://backend.my-app.test` | Clean backend API URL for Vite (no port) |
 | **Backend** | `PORT` | `54322` | Internal ephemeral port (handled by Reverse Proxy) |
-| **Backend** | `APP_URL` | `http://backend.my-app.local` | Clean backend base URL (no port) |
-| **Backend** | `FRONTEND_URL` | `http://my-app.local` | Clean frontend URL for CORS / redirects (no port) |
-| **Backend** | `CORS_ORIGIN` | `http://my-app.local` | CORS allowed origin header (no port) |
+| **Backend** | `APP_URL` | `http://backend.my-app.test` | Clean backend base URL (no port) |
+| **Backend** | `FRONTEND_URL` | `http://my-app.test` | Clean frontend URL for CORS / redirects (no port) |
+| **Backend** | `CORS_ORIGIN` | `http://my-app.test` | CORS allowed origin header (no port) |
 
 ---
 
