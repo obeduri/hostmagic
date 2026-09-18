@@ -1,0 +1,46 @@
+{
+  "name": "hostmagic",
+  "version": "1.0.0",
+  "description": "Automate local fullstack dev with .local domains, random ephemeral ports, and concurrent execution",
+  "type": "module",
+  "main": "dist/cli.js",
+  "bin": {
+    "hostmagic": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test/core.test.ts && bun test/detector.test.ts && bun test/proxy.test.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "cli",
+    "fullstack",
+    "hosts",
+    "local-domains",
+    "development",
+    "concurrent",
+    "ports"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@clack/prompts": "^0.8.2",
+    "commander": "^12.1.0",
+    "execa": "^9.4.1",
+    "get-port": "^7.1.0",
+    "http-proxy": "^1.18.1",
+    "picocolors": "^1.1.0",
+    "tree-kill": "^1.2.2"
+  },
+  "devDependencies": {
+    "@types/http-proxy": "^1.17.17",
+    "@types/node": "^22.5.5",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.2"
+  }
+}
