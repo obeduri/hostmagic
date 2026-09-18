@@ -27,8 +27,16 @@
     "concurrent",
     "ports"
   ],
-  "author": "",
+  "author": "Obed David Pérez Uri <enobe220@gmail.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/obeduri/hostmagic.git"
+  },
+  "homepage": "https://github.com/obeduri/hostmagic#readme",
+  "bugs": {
+    "url": "https://github.com/obeduri/hostmagic/issues"
+  },
   "dependencies": {
     "@clack/prompts": "^0.8.2",
     "commander": "^12.1.0",
