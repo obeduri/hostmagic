@@ -1,6 +1,6 @@
 # 🧙‍♂️ Hostmagic
 
-> Automate local fullstack development with clean `.test` domains, zero-conflict ephemeral ports, and concurrent service execution across Windows, macOS, and Linux.
+> Automate local fullstack development with clean `.test` domains, zero-conflict ephemeral ports, universal OAuth 2.0 support, and concurrent service execution across Windows, macOS, and Linux.
 
 [![npm version](https://img.shields.io/npm/v/hostmagic.svg)](https://www.npmjs.com/package/hostmagic)
 [![License: MIT](https://img.shields.io/badge/License-MIT-magenta.svg)](https://opensource.org/licenses/MIT)
@@ -15,12 +15,12 @@
 ## ⚡ Key Features
 
 - 🌐 **Clean `.test` Domains (No Ports!):** Say goodbye to confusing `localhost:3000` and ports at the end of URLs. Your apps run directly on intuitive addresses like `http://my-app.test` and `http://backend.my-app.test`.
+- 🔐 **Universal OAuth 2.0 Support (Any Provider):** Works seamlessly with **all providers following the OAuth 2.0 standard** (Google, GitHub, GitLab, Discord, Auth0, Okta, Supabase, Apple, Microsoft/Azure AD, Slack, Keycloak, etc.). An auxiliary listener on port 3000 catches incoming callbacks and immediately redirects with HTTP 302/307 to your `.test` domain, delivering PKCE, CSRF tokens, and session cookies with **zero application code changes**.
 - ⚡ **Built-in Port 80 Reverse Proxy:** Transparently routes incoming HTTP traffic and WebSockets (for HMR with Vite, Next.js, and Astro) from port 80 to your services' internal ephemeral ports.
 - 🛡️ **Non-Destructive & Namespaced `hosts` Management:** Safely inserts and updates system `hosts` entries inside isolated `# BEGIN hostmagic:<project>` blocks without corrupting existing entries.
 - 🍎 **Full macOS Support:** Native `/etc/hosts` synchronization with standard `sudo`, immediate mDNS / Bonjour cache clearing via `dscacheutil -flushcache` and `killall -HUP mDNSResponder`, process detection with `lsof`, and default TextEdit / GUI opener support.
 - 🐧 **First-Class Linux Support:** Complete compatibility across Ubuntu, Debian, Fedora, Arch, and more. Safely updates `/etc/hosts` using standard `sudo`, flushes `systemd-resolved` / `resolvectl` caches, detects listeners with `lsof`/`fuser`/`ss`, and supports non-root port 80 binding via `setcap`.
 - 🪟 **Automatic Windows UAC Elevation:** Running without administrative rights in Windows? Hostmagic triggers a native PowerShell UAC elevation prompt automatically without forcing you to restart your terminal as Administrator.
-- 🔐 **Universal OAuth 2.0 Redirect Bridge:** Catches callbacks on `http://localhost:3000` (or `localhost` on port 80) and immediately redirects via HTTP 302/307 to `http://[your-app].test`, letting Google, GitHub, Auth0, Discord, Supabase, and any OAuth 2.0 provider work seamlessly with zero application code changes.
 - 🔍 **Heuristic Service Detection:** Scans subdirectories (`frontend/`, `backend/`, `client/`, `server/`, `apps/web/`, `apps/api/`) and inspects `package.json` to detect Next.js, Vite, Astro, NestJS, Express, etc.
 - 🎲 **Zero-Conflict Ephemeral Ports:** Allocates available random system ports internally via `get-port` so you can run multiple copies or projects simultaneously without port collision errors (`EADDRINUSE`).
 - 💉 **In-Memory Environment Injection:** Injects clean cross-service URLs (`NEXT_PUBLIC_API_URL`, `FRONTEND_URL`, `PORT`) directly into process memory without modifying your physical `.env` files.
@@ -42,7 +42,7 @@
    - [Step 6: Opening System Hosts File (`hm --hostfile`)](#step-6-opening-system-hosts-file-hm---hostfile)
 4. [⚡ Quick 2-Minute Demo Setup (Try Without Existing Project)](#-quick-2-minute-demo-setup)
 5. [⚙️ Configuration Schema (`.hostmagic.json`)](#️-configuration-schema-hostmagicjson)
-6. [🔐 Universal OAuth 2.0 & Third-Party Authentication](#-universal-oauth-20--third-party-authentication)
+6. [🔐 Universal OAuth 2.0 Support (Any Provider)](#-universal-oauth-20-support-any-provider)
 7. [🧩 Injected Environment Variables](#-injected-environment-variables)
 8. [❓ Troubleshooting & FAQs](#-troubleshooting--faqs)
 9. [🏗️ Architecture & Development](#️-architecture--development)
@@ -304,18 +304,57 @@ Hostmagic will honor these fixed ports if available.
 
 ---
 
-## 🔐 Universal OAuth 2.0 & Third-Party Authentication
+## 🔐 Universal OAuth 2.0 Support (Any Provider)
 
-Many popular OAuth 2.0 providers (Google Cloud Console, GitHub, Discord, Auth0, Supabase, Apple, Microsoft, etc.) either strictly disallow custom TLDs like `.test` over plain HTTP or are already pre-configured in developer dashboards with `http://localhost:3000/api/auth/callback/...`.
+OAuth 2.0 in local development with custom domains has historically been painful:
+- Major providers (e.g. Google Cloud Console) strictly reject `.test` or custom TLDs over plain HTTP (*"Invalid redirect URI: must use localhost"*).
+- Developer credentials and documentation default to `http://localhost:3000/api/auth/callback/<provider>`.
+- Redirecting back to `localhost` causes the browser to lose `.test` origin cookies (such as PKCE `code_verifier`, `state`, and CSRF tokens), breaking authentication libraries like NextAuth, Auth.js, Lucia, Supabase Auth, or Passport.
 
-Hostmagic solves this universally with its **Universal OAuth 2.0 Redirect Bridge**:
-1. **Auxiliary Port 3000 Listener:** Hostmagic listens on port 3000 concurrently alongside primary port 80.
-2. **Catch & Direct 302/307 Redirect:** When any external OAuth provider completes and redirects to `http://localhost:3000/api/auth/callback/<provider>?code=...&state=...` (or `/auth/callback`), Hostmagic catches it and immediately redirects the browser to:
-   ```
-   http://<project>.test/api/auth/callback/<provider>?code=...&state=...
-   ```
-3. **Native Browser Cookie Transmission:** Because the browser redirects to your `.test` origin, the browser naturally delivers all cookies belonging to that domain (such as NextAuth/Auth.js PKCE `code_verifier`, `state`, CSRF tokens, and session cookies).
-4. **Zero Application Code Changes:** Your provider settings and `.env` configs (configured with `localhost:3000` or `.test`) work out of the box with zero friction.
+Hostmagic solves this with an RFC 6749 compliant **Universal OAuth 2.0 Redirect Bridge**:
+
+### 🎯 Compatible Providers
+Hostmagic works natively with **any provider conforming to the OAuth 2.0 authorization framework**:
+
+| Provider | Supported | Typical Callback Path |
+| :--- | :---: | :--- |
+| 🌐 **Google Identity** | ✅ Full | `/api/auth/callback/google` |
+| 🐙 **GitHub OAuth** | ✅ Full | `/api/auth/callback/github` |
+| 🦊 **GitLab** | ✅ Full | `/api/auth/callback/gitlab` |
+| 💬 **Discord** | ✅ Full | `/api/auth/callback/discord` |
+| 🛡️ **Auth0 / Okta** | ✅ Full | `/api/auth/callback/auth0` |
+| ⚡ **Supabase Auth** | ✅ Full | `/auth/v1/callback` |
+| 🍎 **Apple Sign-In** | ✅ Full (307 POST & GET) | `/api/auth/callback/apple` |
+| 🪟 **Microsoft / Azure AD** | ✅ Full | `/api/auth/callback/azure-ad` |
+| 💼 **Slack** | ✅ Full | `/api/auth/callback/slack` |
+| 🔒 **Keycloak / Custom OIDC** | ✅ Full | `/api/auth/callback/keycloak` |
+
+### 🔄 How the Universal OAuth 2.0 Flow Works:
+
+```text
+ 1. User clicks "Sign In" on http://my-app.test
+        │
+        ▼
+ 2. App initiates OAuth request -> External Provider (Google, GitHub, Auth0, etc.)
+        │ (Hostmagic ensures redirect_uri=http://localhost:3000 for strict providers)
+        ▼
+ 3. Provider authorizes user and redirects browser to:
+    http://localhost:3000/api/auth/callback/<provider>?code=...&state=...
+        │
+        ▼
+ 4. Hostmagic auxiliary port 3000 listener catches the callback!
+        │ (Correlates state & issues HTTP 302 Found)
+        ▼
+ 5. Browser redirects to: http://my-app.test/api/auth/callback/<provider>?code=...&state=...
+        │ (Browser natively sends all my-app.test cookies: PKCE verifier, state, session)
+        ▼
+ 6. Your application completes the token exchange natively under my-app.test!
+```
+
+### 🚀 Zero Application Code Changes
+- **Leave your `.env` intact:** If your application or provider dashboard is configured with `http://localhost:3000`, Hostmagic catches it and redirects seamlessly to your `.test` domain.
+- **No changes in provider developer consoles:** Keep your registered callback as `http://localhost:3000/api/auth/callback/<provider>` without worrying about provider restrictions on custom TLDs.
+- **Works with any auth library:** NextAuth.js / Auth.js, Passport.js, Supabase Auth, Lucia, Firebase Auth, Remix Auth, or custom OAuth 2.0 implementations.
 
 ---
 
