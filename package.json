@@ -5,8 +5,8 @@
   "type": "module",
   "main": "dist/cli.js",
   "bin": {
-    "hostmagic": "./dist/cli.js",
-    "hm": "./dist/cli.js"
+    "hostmagic": "dist/cli.js",
+    "hm": "dist/cli.js"
   },
   "files": [
     "dist"
