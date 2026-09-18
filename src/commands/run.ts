@@ -74,6 +74,8 @@ export async function runCommand(): Promise<void> {
       console.error(pc.red('\nAborted: Port 80 is required for Hostmagic Reverse Proxy.'));
       process.exit(1);
     }
+    // Also ensure port 3000 is free for localhost:3000 OAuth callback bridge
+    await freePortIfOccupied(3000, 'OAuth Callback Bridge');
   }
 
   // Ensure each service port is free, and clean any Next.js locks
@@ -161,7 +163,7 @@ export async function runCommand(): Promise<void> {
       frontendPort: frontendRuntime?.port,
     });
     try {
-      await proxyServer.start(80);
+      await proxyServer.start(80, 3000);
     } catch (err: any) {
       console.error(
         pc.red(`\n❌ Failed to start reverse proxy on port 80: ${err.message}`)
@@ -217,9 +219,9 @@ function printBanner(projectName: string, services: ServiceRuntimeInfo[], isGate
   }
 
   if (services.some((s) => s.service.type === 'frontend')) {
-    const oauth = `  • ${pc.blue('[OAUTH]   ')} ${pc.bold('localhost')}: ${pc.underline(pc.green('http://localhost'))} ${pc.dim('(Google/OAuth origin)')}`;
+    const oauth = `  • ${pc.blue('[OAUTH]   ')} ${pc.bold('localhost:3000')}: ${pc.underline(pc.green('http://localhost:3000'))} ${pc.dim('(OAuth callback bridge)')}`;
     console.log(
-      pc.magenta(`│`) + oauth + ' '.repeat(Math.max(0, 73 - (9 + 16 + 23))) + pc.magenta(`│`)
+      pc.magenta(`│`) + oauth + ' '.repeat(Math.max(0, 73 - (9 + 21 + 25))) + pc.magenta(`│`)
     );
   }
 

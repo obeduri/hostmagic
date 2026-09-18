@@ -15,6 +15,7 @@ export interface ProjectRegistration {
 
 export class ReverseProxyServer {
   private server: http.Server;
+  private oauthBridgeServer?: http.Server;
   private proxy: httpProxy;
   private routes: Map<string, number> = new Map();
   private projects: Map<string, ProjectRegistration> = new Map();
@@ -24,6 +25,11 @@ export class ReverseProxyServer {
     string,
     { cookies: string[]; targetUrl: string; originDomain: string; timestamp: number }
   > = new Map();
+  private oauthStateCache: Map<
+    string,
+    { cookies: string[]; domain: string; timestamp: number }
+  > = new Map();
+  private lastOAuthCookies: string[] = [];
   private lastOAuthDomain?: string;
   private lastActiveProject?: string;
 
@@ -45,9 +51,32 @@ export class ReverseProxyServer {
       const location = proxyRes.headers['location'];
 
       // 1. Rewrite outgoing OAuth initiation redirects (e.g. accounts.google.com)
-      if (location && (location.includes('accounts.google.com') || location.includes('/oauth'))) {
-        if (host && (host.endsWith('.test') || host.endsWith('.local'))) {
+      if (
+        location &&
+        (location.includes('accounts.google.com') ||
+          location.includes('/oauth') ||
+          location.includes('/authorize') ||
+          location.includes('auth'))
+      ) {
+        if (host && (host.endsWith('.test') || host.endsWith('.local') || this.routes.has(host))) {
           this.lastOAuthDomain = host;
+        }
+
+        const rawSetCookie = proxyRes.headers['set-cookie'];
+        if (rawSetCookie) {
+          const cookies = Array.isArray(rawSetCookie) ? rawSetCookie : [rawSetCookie];
+          this.lastOAuthCookies = cookies;
+          try {
+            const parsed = new URL(location);
+            const state = parsed.searchParams.get('state');
+            if (state) {
+              this.oauthStateCache.set(state, {
+                cookies,
+                domain: host,
+                timestamp: Date.now(),
+              });
+            }
+          } catch {}
         }
 
         try {
@@ -72,16 +101,38 @@ export class ReverseProxyServer {
       // 2. Intercept incoming OAuth callback responses on localhost to sync session cookies
       const isLocalhost = host === 'localhost' || host === '127.0.0.1';
       const isOAuthCallback =
-        req.url?.includes('/api/auth/callback') || req.url?.includes('/auth/callback');
+        req.url?.includes('/api/auth/callback') ||
+        req.url?.includes('/auth/callback') ||
+        req.url?.includes('/callback');
 
       if (isLocalhost && isOAuthCallback) {
-        const targetDomain = this.lastOAuthDomain || this.getDefaultProjectDomain();
+        let stateDomain: string | undefined;
+        try {
+          const parsedUrl = new URL(req.url || '/', 'http://localhost');
+          const state = parsedUrl.searchParams.get('state');
+          if (state && this.oauthStateCache.has(state)) {
+            stateDomain = this.oauthStateCache.get(state)!.domain;
+          }
+        } catch {}
+
+        const targetDomain = stateDomain || this.lastOAuthDomain || this.getDefaultProjectDomain();
 
         if (targetDomain) {
           const rawCookies = proxyRes.headers['set-cookie'];
           if (rawCookies && rawCookies.length > 0) {
-            const syncId = (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : Math.random().toString(36).slice(2));
-            const targetLocation = proxyRes.headers['location'] || '/';
+            const syncId =
+              globalThis.crypto?.randomUUID
+                ? globalThis.crypto.randomUUID()
+                : Math.random().toString(36).slice(2);
+            let targetLocation = proxyRes.headers['location'] || '/';
+
+            // Sanitize targetLocation: if NextAuth sent http://localhost:3000/path or http://localhost/path, convert to /path
+            try {
+              const parsedLoc = new URL(targetLocation, `http://${targetDomain}`);
+              if (parsedLoc.hostname === 'localhost' || parsedLoc.hostname === '127.0.0.1') {
+                targetLocation = `${parsedLoc.pathname}${parsedLoc.search}${parsedLoc.hash}` || '/';
+              }
+            } catch {}
 
             this.oauthSyncCache.set(syncId, {
               cookies: Array.isArray(rawCookies) ? rawCookies : [rawCookies],
@@ -97,10 +148,24 @@ export class ReverseProxyServer {
                 this.oauthSyncCache.delete(key);
               }
             }
+            for (const [key, item] of this.oauthStateCache.entries()) {
+              if (now - item.timestamp > 120000) {
+                this.oauthStateCache.delete(key);
+              }
+            }
 
             // Redirect browser to the target domain to install the session cookies on that origin!
             proxyRes.headers['location'] = `http://${targetDomain}/__hostmagic_oauth_sync?syncId=${syncId}`;
             delete proxyRes.headers['set-cookie'];
+          } else if (proxyRes.headers['location']) {
+            // Even if no cookies were set, ensure the redirect doesn't trap the user on localhost:3000!
+            let loc = proxyRes.headers['location'];
+            try {
+              const parsedLoc = new URL(loc, `http://${targetDomain}`);
+              if (parsedLoc.hostname === 'localhost' || parsedLoc.hostname === '127.0.0.1') {
+                proxyRes.headers['location'] = `http://${targetDomain}${parsedLoc.pathname}${parsedLoc.search}${parsedLoc.hash}`;
+              }
+            } catch {}
           }
         }
       }
@@ -127,168 +192,218 @@ export class ReverseProxyServer {
       }
     });
 
-    const requestHandler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
-      const rawHost = req.headers.host || '';
-      const host = rawHost.split(':')[0].toLowerCase();
-      const url = req.url || '/';
+    this.server = http.createServer(this.requestHandler);
+    this.server.on('upgrade', this.upgradeHandler);
+  }
 
-      // 0. OAuth Session Cookie Synchronization Endpoint
-      if (url.startsWith('/__hostmagic_oauth_sync')) {
-        try {
-          const parsedUrl = new URL(url, `http://${rawHost}`);
-          const syncId = parsedUrl.searchParams.get('syncId');
-          if (syncId && this.oauthSyncCache.has(syncId)) {
-            const syncData = this.oauthSyncCache.get(syncId)!;
-            this.oauthSyncCache.delete(syncId);
+  private requestHandler = async (
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> => {
+    const rawHost = req.headers.host || '';
+    const host = rawHost.split(':')[0].toLowerCase();
+    const url = req.url || '/';
 
-            // Sanitize cookies for local HTTP development:
-            // Remove '; Secure' so browser doesn't discard them over HTTP
-            // Remove '; Domain=...' so they bind directly to the current origin
-            const cleanCookies = syncData.cookies.map((c) =>
-              c.replace(/;\s*secure/gi, '').replace(/;\s*domain=[^;]+/gi, '')
-            );
-
-            res.writeHead(302, {
-              Location: syncData.targetUrl || '/',
-              'Set-Cookie': cleanCookies,
-              'Cache-Control': 'no-store',
-            });
-            res.end();
-            return;
-          }
-        } catch {
-          // Fallthrough if parsing fails
-        }
-      }
-
-      // 1. Internal Hostmagic Gateway Control Endpoints
-      if (url === '/__hostmagic' || url === '/__hostmagic/' || url === '/__hostmagic/hub') {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(this.renderGatewayHubHtml());
-        return;
-      }
-
-      if (url.startsWith('/__hostmagic/')) {
-        if (url === '/__hostmagic/status' && req.method === 'GET') {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              hostmagic: true,
-              version: '1.0.0',
-              projects: Array.from(this.projects.values()),
-            })
-          );
-          return;
-        }
-
-        if (url === '/__hostmagic/register' && req.method === 'POST') {
-          try {
-            const body = await this.readJsonBody(req);
-            if (body && body.name && Array.isArray(body.routes)) {
-              this.registerProject(body);
-              res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ success: true, project: body.name }));
-              return;
-            }
-          } catch {
-            // Bad payload
-          }
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Invalid project payload' }));
-          return;
-        }
-
-        if (url === '/__hostmagic/unregister' && req.method === 'POST') {
-          try {
-            const body = await this.readJsonBody(req);
-            if (body && body.name) {
-              this.unregisterProject(body.name);
-              res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ success: true, unregistered: body.name }));
-              return;
-            }
-          } catch {
-            // Bad payload
-          }
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Invalid project payload' }));
-          return;
-        }
-
-        if (url.startsWith('/__hostmagic/select-target')) {
-          const parsedUrl = new URL(req.url || '/', `http://${rawHost}`);
-          const target = parsedUrl.searchParams.get('project');
-          if (target && this.projects.has(target)) {
-            this.activeLocalhostTarget = target;
-            res.writeHead(302, {
-              'Set-Cookie': `hostmagic_target=${target}; Path=/; SameSite=Lax`,
-              Location: '/',
-            });
-            res.end();
-            return;
-          }
-        }
-      }
-
-      // 2. Localhost & 127.0.0.1 routing (for OAuth callback & manual visits)
-      if (host === 'localhost' || host === '127.0.0.1') {
-        const targetPort = this.resolveLocalhostTarget(req);
-        if (targetPort) {
-          this.proxy.web(req, res, { target: `http://127.0.0.1:${targetPort}` });
-          return;
-        }
-
-        // When multiple projects are running and no specific target selected, show Gateway Hub
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(this.renderGatewayHubHtml());
-        return;
-      }
-
-      // 3. Domain-specific routing (e.g. abogando.test, api.abogando.test)
-      const targetPort = this.routes.get(host);
-      if (targetPort) {
-        // Automatically track the project the developer is actively browsing
+    // Track active OAuth origin when auth initiation request arrives on a project domain
+    if (url.includes('/api/auth') || url.includes('/auth/')) {
+      if (host && host !== 'localhost' && host !== '127.0.0.1') {
+        this.lastOAuthDomain = host;
         for (const [pName, p] of this.projects.entries()) {
           if (p.routes.some((r) => r.domain === host)) {
             this.lastActiveProject = pName;
             break;
           }
         }
-
-        this.proxy.web(req, res, {
-          target: `http://127.0.0.1:${targetPort}`,
-        });
-      } else {
-        res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(this.renderNotFoundHtml(rawHost));
       }
-    };
+    }
 
-    this.server = http.createServer(requestHandler);
+    // 0. OAuth Session Cookie Synchronization Endpoint
+    if (url.startsWith('/__hostmagic_oauth_sync')) {
+      try {
+        const parsedUrl = new URL(url, `http://${rawHost}`);
+        const syncId = parsedUrl.searchParams.get('syncId');
+        if (syncId && this.oauthSyncCache.has(syncId)) {
+          const syncData = this.oauthSyncCache.get(syncId)!;
+          this.oauthSyncCache.delete(syncId);
 
-    // WebSocket support for Hot Module Reloading (Vite, Next.js, Astro)
-    const upgradeHandler = (req: http.IncomingMessage, socket: any, head: Buffer) => {
-      const rawHost = req.headers.host || '';
-      const host = rawHost.split(':')[0].toLowerCase();
+          // Sanitize cookies for local HTTP development:
+          // Remove '; Secure' so browser doesn't discard them over HTTP
+          // Remove '; Domain=...' so they bind directly to the current origin
+          const cleanCookies = syncData.cookies.map((c) =>
+            c.replace(/;\s*secure/gi, '').replace(/;\s*domain=[^;]+/gi, '')
+          );
 
-      let targetPort: number | undefined;
-      if (host === 'localhost' || host === '127.0.0.1') {
-        targetPort = this.resolveLocalhostTarget(req);
-      } else {
-        targetPort = this.routes.get(host);
+          res.writeHead(302, {
+            Location: syncData.targetUrl || '/',
+            'Set-Cookie': cleanCookies,
+            'Cache-Control': 'no-store',
+          });
+          res.end();
+          return;
+        }
+      } catch {
+        // Fallthrough if parsing fails
+      }
+    }
+
+    // 1. Internal Hostmagic Gateway Control Endpoints
+    if (url === '/__hostmagic' || url === '/__hostmagic/' || url === '/__hostmagic/hub') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(this.renderGatewayHubHtml());
+      return;
+    }
+
+    if (url.startsWith('/__hostmagic/')) {
+      if (url === '/__hostmagic/status' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            hostmagic: true,
+            version: '1.0.0',
+            projects: Array.from(this.projects.values()),
+          })
+        );
+        return;
       }
 
+      if (url === '/__hostmagic/register' && req.method === 'POST') {
+        try {
+          const body = await this.readJsonBody(req);
+          if (body && body.name && Array.isArray(body.routes)) {
+            this.registerProject(body);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, project: body.name }));
+            return;
+          }
+        } catch {
+          // Bad payload
+        }
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid project payload' }));
+        return;
+      }
+
+      if (url === '/__hostmagic/unregister' && req.method === 'POST') {
+        try {
+          const body = await this.readJsonBody(req);
+          if (body && body.name) {
+            this.unregisterProject(body.name);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, unregistered: body.name }));
+            return;
+          }
+        } catch {
+          // Bad payload
+        }
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid project payload' }));
+        return;
+      }
+
+      if (url.startsWith('/__hostmagic/select-target')) {
+        const parsedUrl = new URL(req.url || '/', `http://${rawHost}`);
+        const target = parsedUrl.searchParams.get('project');
+        if (target && this.projects.has(target)) {
+          this.activeLocalhostTarget = target;
+          res.writeHead(302, {
+            'Set-Cookie': `hostmagic_target=${target}; Path=/; SameSite=Lax`,
+            Location: '/',
+          });
+          res.end();
+          return;
+        }
+      }
+    }
+
+    // 2. Localhost & 127.0.0.1 routing (for OAuth callback on port 80 or 3000 & manual visits)
+    if (host === 'localhost' || host === '127.0.0.1') {
+      const isOAuthCallback =
+        url.includes('/api/auth/callback') ||
+        url.includes('/auth/callback') ||
+        url.includes('/callback');
+
+      if (isOAuthCallback) {
+        // Transfer initiation cookies (state, PKCE code_verifier, CSRF) from origin to callback
+        let cookiesToInject: string[] = [];
+        try {
+          const parsedUrl = new URL(url, 'http://localhost');
+          const state = parsedUrl.searchParams.get('state');
+          if (state && this.oauthStateCache.has(state)) {
+            const cached = this.oauthStateCache.get(state)!;
+            cookiesToInject = cached.cookies;
+            this.lastOAuthDomain = cached.domain;
+          } else if (this.lastOAuthCookies.length > 0) {
+            cookiesToInject = this.lastOAuthCookies;
+          }
+        } catch {
+          if (this.lastOAuthCookies.length > 0) {
+            cookiesToInject = this.lastOAuthCookies;
+          }
+        }
+
+        if (cookiesToInject.length > 0) {
+          const existingCookie = req.headers.cookie || '';
+          const pairs = cookiesToInject.map((c) => c.split(';')[0].trim()).filter(Boolean);
+          const merged = [existingCookie, ...pairs].filter(Boolean).join('; ');
+          req.headers.cookie = merged;
+        }
+      }
+
+      const targetPort = this.resolveLocalhostTarget(req);
       if (targetPort) {
-        this.proxy.ws(req, socket, head, {
-          target: `ws://127.0.0.1:${targetPort}`,
-        });
-      } else {
-        socket.destroy();
+        this.proxy.web(req, res, { target: `http://127.0.0.1:${targetPort}` });
+        return;
       }
-    };
 
-    this.server.on('upgrade', upgradeHandler);
-  }
+      // When multiple projects are running and no specific target selected, show Gateway Hub
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(this.renderGatewayHubHtml());
+      return;
+    }
+
+    // 3. Domain-specific routing (e.g. abogando.test, api.abogando.test)
+    const targetPort = this.routes.get(host);
+    if (targetPort) {
+      // Automatically track the project the developer is actively browsing
+      for (const [pName, p] of this.projects.entries()) {
+        if (p.routes.some((r) => r.domain === host)) {
+          this.lastActiveProject = pName;
+          break;
+        }
+      }
+
+      this.proxy.web(req, res, {
+        target: `http://127.0.0.1:${targetPort}`,
+      });
+    } else {
+      res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(this.renderNotFoundHtml(rawHost));
+    }
+  };
+
+  private upgradeHandler = (
+    req: http.IncomingMessage,
+    socket: any,
+    head: Buffer
+  ): void => {
+    const rawHost = req.headers.host || '';
+    const host = rawHost.split(':')[0].toLowerCase();
+
+    let targetPort: number | undefined;
+    if (host === 'localhost' || host === '127.0.0.1') {
+      targetPort = this.resolveLocalhostTarget(req);
+    } else {
+      targetPort = this.routes.get(host);
+    }
+
+    if (targetPort) {
+      this.proxy.ws(req, socket, head, {
+        target: `ws://127.0.0.1:${targetPort}`,
+      });
+    } else {
+      socket.destroy();
+    }
+  };
 
   public registerProject(project: ProjectRegistration): void {
     // Remove previous routes for this project if re-registering
@@ -503,10 +618,11 @@ export class ReverseProxyServer {
     `;
   }
 
-  public async start(port: number = 80): Promise<void> {
+  public async start(port: number = 80, oauthPort: number = 3000): Promise<void> {
     this.listeningPort = port;
 
-    return new Promise((resolve, reject) => {
+    // 1. Start primary reverse proxy (default: port 80)
+    await new Promise<void>((resolve, reject) => {
       this.server.listen(port, '0.0.0.0', () => {
         resolve();
       });
@@ -537,11 +653,37 @@ export class ReverseProxyServer {
         }
       });
     });
+
+    // 2. Start auxiliary OAuth Callback Bridge (default: port 3000) to catch localhost:3000 redirects
+    if (oauthPort && oauthPort !== port) {
+      this.oauthBridgeServer = http.createServer(this.requestHandler);
+      this.oauthBridgeServer.on('upgrade', this.upgradeHandler);
+
+      await new Promise<void>((resolve) => {
+        this.oauthBridgeServer!.listen(oauthPort, '0.0.0.0', () => {
+          resolve();
+        });
+
+        this.oauthBridgeServer!.on('error', (err: any) => {
+          // If port 3000 is occupied, don't crash the main gateway - just disable the auxiliary bridge
+          if (err.code === 'EADDRINUSE') {
+            this.oauthBridgeServer = undefined;
+          }
+          resolve();
+        });
+      });
+    }
   }
 
   public async stop(): Promise<void> {
     return new Promise((resolve) => {
       this.proxy.close();
+      if (this.oauthBridgeServer) {
+        try {
+          this.oauthBridgeServer.close(() => {});
+        } catch {}
+        this.oauthBridgeServer = undefined;
+      }
       this.server.close(() => {
         resolve();
       });
