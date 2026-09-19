@@ -19,6 +19,8 @@
 ## ⚡ Key Features
 
 - 🌐 **Clean `.test` Domains (No Ports!):** Say goodbye to confusing `localhost:3000` and ports at the end of URLs. Your apps run directly on intuitive addresses like `http://my-app.test` and `http://backend.my-app.test`.
+- 🎛️ **Central Settings & Live Logs (`http://hostmagic.settings`):** Built-in administrative dashboard running directly on port 80. View all active routes, inspect real-time log output with one-click clipboard copying (`📋 Copy Logs`), and dynamically add or delete proxy routes in memory.
+- 🔄 **Hot-Refresh Settings & DNS (`hm --rs`):** Instantly flush DNS cache, synchronize system hosts, and push updated dashboard templates into the running gateway in memory—without stopping or restarting your background dev servers.
 - 🔐 **Universal OAuth 2.0 Support (Any Provider):** Works seamlessly with **all providers following the OAuth 2.0 standard** (Google, GitHub, GitLab, Discord, Auth0, Okta, Supabase, Apple, Microsoft/Azure AD, Slack, Keycloak, etc.). An auxiliary listener on port 3000 catches incoming callbacks and immediately redirects with HTTP 302/307 to your `.test` domain, delivering PKCE, CSRF tokens, and session cookies with **zero application code changes**.
 - ⚡ **Built-in Port 80 Reverse Proxy:** Transparently routes incoming HTTP traffic and WebSockets (for HMR with Vite, Next.js, and Astro) from port 80 to your services' internal ephemeral ports.
 - 🛡️ **Non-Destructive & Namespaced `hosts` Management:** Safely inserts and updates system `hosts` entries inside isolated `# BEGIN hostmagic:<project>` blocks without corrupting existing entries.
@@ -36,18 +38,21 @@
 ## 📑 Table of Contents
 
 1. [Prerequisites](#-prerequisites)
-2. [Installation & Setup](#-step-1-installation--setup)
-3. [Step-by-Step Usage Guide](#-step-by-step-usage-guide)
-   - [Step 1: Initialize Your Project (`hm init`)](#step-1-initialize-your-project-hm-init)
-   - [Step 2: Run Services Concurrently (`hm dev`)](#step-2-run-services-concurrently-hm-dev)
-   - [Step 3: Browser Access & Hot Reloading](#step-3-browser-access--hot-reloading)
-   - [Step 4: Stopping Services (`ESC` or `Ctrl+C`)](#step-4-stopping-services-esc-or-ctrlc)
-   - [Step 5: Cleaning Up Hosts Entries (`hm clean`)](#step-5-cleaning-up-hosts-entries-hm-clean)
-   - [Step 6: Opening System Hosts File (`hm --hostfile`)](#step-6-opening-system-hosts-file-hm---hostfile)
-4. [⚡ Quick 2-Minute Demo Setup (Try Without Existing Project)](#-quick-2-minute-demo-setup)
-5. [⚙️ Configuration Schema (`.hostmagic.json`)](#️-configuration-schema-hostmagicjson)
-6. [🔐 Universal OAuth 2.0 Support (Any Provider)](#-universal-oauth-20-support-any-provider)
-7. [🧩 Injected Environment Variables](#-injected-environment-variables)
+2. [Step-by-Step Usage Guide](#-step-by-step-usage-guide)
+   - [Step 1: Installation & Setup](#step-1-installation--setup)
+   - [Step 2: Initialize Your Project (`hm init`)](#step-2-initialize-your-project-hm-init)
+   - [Step 3: Run Services Concurrently (`hm dev`)](#step-3-run-services-concurrently-hm-dev)
+   - [Step 4: Browser Access & Hot Reloading](#step-4-browser-access--hot-reloading)
+   - [Step 5: Administrative Dashboard & Live Logs (`http://hostmagic.settings`)](#step-5-administrative-dashboard--live-logs-httphostmagicsettings)
+   - [Step 6: Hot-Refresh Settings & Routes (`hm --rs`)](#step-6-hot-refresh-settings--routes-hm---rs)
+   - [Step 7: Stopping Services (`ESC` or `Ctrl+C`)](#step-7-stopping-services-esc-or-ctrlc)
+   - [Step 8: Cleaning Up Hosts Entries (`hm clean`)](#step-8-cleaning-up-hosts-entries-hm-clean)
+   - [Step 9: Opening System Hosts File (`hm --hostfile`)](#step-9-opening-system-hosts-file-hm---hostfile)
+3. [⚡ Quick 2-Minute Demo Setup (Try Without Existing Project)](#-quick-2-minute-demo-setup)
+4. [⚙️ Configuration Schema (`.hostmagic.json`)](#️-configuration-schema-hostmagicjson)
+5. [🔐 Universal OAuth 2.0 Support (Any Provider)](#-universal-oauth-20-support-any-provider)
+6. [🧩 Injected Environment Variables](#-injected-environment-variables)
+7. [📋 Full CLI Command Reference](#-full-cli-command-reference)
 8. [❓ Troubleshooting & FAQs](#-troubleshooting--faqs)
 9. [🏗️ Architecture & Development](#️-architecture--development)
 10. [📄 License](#-license)
@@ -149,13 +154,15 @@ sudo hm dev
 5. **Displays Interactive Banner:**
    ```text
    ┌────────────────────────────────────────────────────────────────┐
-   │  🚀 Hostmagic is running clean domains for [my-app]            │
+   │  🚀 Hostmagic running [my-app]                                 │
    ├────────────────────────────────────────────────────────────────┤
    │  • [FRONTEND] frontend: http://my-app.test                     │
    │  • [BACKEND]  backend:  http://backend.my-app.test             │
+   │  • [SETTINGS] hostmagic.settings: http://hostmagic.settings    │
+   │  • [OAUTH]    localhost:3000: http://localhost:3000 (OAuth)    │
    ├────────────────────────────────────────────────────────────────┤
-   │  ⚡ Port 80 Reverse Proxy active (no port numbers needed in browser) │
-   │  Press Ctrl+C at any time to gracefully stop all services.     │
+   │  ⚡ Port 80 Gateway active (multi-project concurrent reverse proxy) │
+   │  Press ESC or Ctrl+C at any time to gracefully stop all services.│
    └────────────────────────────────────────────────────────────────┘
    ```
 6. **Streams Prefixed Logs:** Displays concurrent output with `[FRONT]` (Cyan) and `[BACK]` (Magenta) tags.
@@ -167,12 +174,52 @@ sudo hm dev
 Open your browser and navigate directly to:
 - **Frontend Application:** `http://my-app.test`
 - **Backend API:** `http://backend.my-app.test`
+- **Settings Dashboard:** `http://hostmagic.settings`
 
 **No port numbers required!** Full WebSocket proxying is enabled, meaning Hot Module Replacement (HMR) in Vite, Next.js, and Astro works seamlessly out of the box across Chrome, Safari, Firefox, Edge, Arc, and Brave on macOS, Linux, and Windows.
 
 ---
 
-### Step 5: Stopping Services (`ESC` or `Ctrl+C`)
+### Step 5: Administrative Dashboard & Live Logs (`http://hostmagic.settings`)
+
+Hostmagic provides a dedicated local control plane running directly on port 80:
+
+👉 **Open in browser:** [http://hostmagic.settings](http://hostmagic.settings)
+
+#### What you can do from the dashboard:
+- 📊 **Real-time Overview:** View all registered fullstack projects, clean domains, internal ephemeral ports, and live health status (🟢 Online).
+- 📜 **Live Service Logs:** Click **View Logs** on any service to open a real-time modal streaming stdout and stderr output directly from the child processes.
+- 📋 **One-Click Copy Logs:** Click the **`📋 Copy Logs`** button inside the log viewer to instantly copy the complete, ANSI-stripped log history to your clipboard—perfect for troubleshooting or sharing error stack traces with AI assistants.
+- ➕ **Dynamic In-Memory Route Management:** Add or remove proxy routes on the fly without modifying configuration files or restarting running services.
+- 🔌 **REST API Integration:** Programmatically query or manage the running gateway:
+  - `GET /__hostmagic/api/status` — Returns active routes, registered projects, and gateway health.
+  - `GET /__hostmagic/api/logs?target=<domain>` — Retrieves the buffered log history for a specific service or domain.
+  - `POST /__hostmagic/api/routes` — Dynamically binds a custom domain to a target port: `{"domain": "docs.my-app.test", "targetPort": 8080}`.
+  - `DELETE /__hostmagic/api/routes` — Unregisters a dynamic route: `{"domain": "docs.my-app.test"}`.
+  - `POST /__hostmagic/api/refresh-settings` — Hot-pushes updated dashboard templates and route definitions into memory.
+
+---
+
+### Step 6: Hot-Refresh Settings & Routes (`hm --rs`)
+
+When you modify `.hostmagic.json`, add new domains, or wish to update the settings dashboard without interrupting your running development servers:
+
+```bash
+# Hot-refresh settings, templates, and routes on the active gateway
+hm --rs
+# or: hm --refresh-settings, hm rs, hm refresh-settings
+```
+
+#### What `hm --rs` does:
+1. **Flushes DNS Cache:** Runs `ipconfig /flushdns` (Windows), `dscacheutil` (macOS), or `resolvectl` (Linux) to guarantee instant hostname resolution.
+2. **Synchronizes System Hosts:** Ensures `# BEGIN hostmagic:system` and `127.0.0.1 hostmagic.settings` are intact in your operating system's `hosts` file.
+3. **Synchronizes Project Routes:** Reads your project's `.hostmagic.json` and updates the active gateway's route table.
+4. **Hot-Reloads Dashboard Template:** Injects the latest dashboard HTML template into the running gateway process in memory via HTTP (`POST /__hostmagic/api/refresh-settings`).
+5. **Zero Downtime:** Your running processes (Next.js dev servers, Vite watchers, backend API instances) keep running completely uninterrupted!
+
+---
+
+### Step 7: Stopping Services (`ESC` or `Ctrl+C`)
 
 To stop all running services cleanly:
 - Press **`ESC`** or **`Ctrl + C`** in your terminal.
@@ -180,7 +227,7 @@ To stop all running services cleanly:
 
 ---
 
-### Step 6: Cleaning Up Hosts Entries (`hm clean`)
+### Step 8: Cleaning Up Hosts Entries (`hm clean`)
 
 To remove domain entries from your operating system's `hosts` file:
 
@@ -200,7 +247,7 @@ hm clean --all --yes
 
 ---
 
-### Step 7: Opening System Hosts File (`hm --hostfile`)
+### Step 9: Opening System Hosts File (`hm --hostfile`)
 
 Instantly open your operating system's `hosts` file across **Windows**, **macOS**, and **Linux** in your default or preferred editor:
 
@@ -398,7 +445,35 @@ Hostmagic injects these environment variables in-memory for each service at runt
 
 ---
 
+## 📋 Full CLI Command Reference
+
+You can use either `hostmagic` or the shorthand **`hm`** alias interchangeably:
+
+| Command | Aliases & Options | Description |
+| :--- | :--- | :--- |
+| `hm init` | `hostmagic init` | Interactive project setup wizard: detects services, assigns `.test` domains, and updates system `hosts`. |
+| | `-y, --yes` | Accept all detected defaults without interactive prompts. |
+| | `-n, --name <name>` | Specify a custom project name for domain resolution. |
+| | `-t, --tld <tld>` | Specify a custom top-level domain / suffix (default: `"test"`). |
+| `hm dev` | `hm run`, `hm start` | Allocate dynamic ephemeral ports, start port 80 gateway, OAuth bridge, and stream prefixed logs. |
+| `hm --rs` | `hm --refresh-settings`, `hm rs` | **Hot-refresh:** Flushes DNS cache, re-syncs system `hosts`, updates project routes, and pushes latest dashboard template into gateway memory without restarting dev processes. |
+| `hm --hostfile` | `hm -H`, `hm hostfile`, `hm hosts` | Open operating system's `hosts` file across Windows, macOS, and Linux in your default editor. |
+| | `-e, --editor <editor>` | Open `hosts` with a custom editor (e.g. `code`, `cursor`, `nano`, `notepad`). |
+| `hm clean` | `hostmagic clean` | Remove Hostmagic domain entries from system `hosts` for current project. |
+| | `-a, --all` | Remove Hostmagic entries across **all** projects. |
+| | `-y, --yes` | Skip interactive confirmation warning prompt. |
+| `hm --version` | `hm -V` | Display currently installed version of Hostmagic (e.g. `1.0.6`). |
+| `hm --help` | `hm -h` | Display CLI help menu and list of available options. |
+
+---
+
 ## ❓ Troubleshooting & FAQs
+
+### Q: How do I access the administrative dashboard and service logs?
+Simply start your project with `hm dev` and open [http://hostmagic.settings](http://hostmagic.settings) in any web browser. You'll see all running projects, their clean domains, target ephemeral ports, and live status. Clicking **View Logs** on any service opens a real-time console with a **`📋 Copy Logs`** button to copy clean output directly to your clipboard.
+
+### Q: Can I refresh the dashboard or update routes without restarting my servers?
+**Yes!** Run `hm --rs` or `hm --refresh-settings` in any terminal. It hot-pushes the updated dashboard template and route tables directly to the active Port 80 Gateway in memory and flushes your operating system's DNS cache, leaving your Next.js dev servers or backend APIs running without interruption.
 
 ### Q: How do I run Hostmagic on macOS and Linux?
 On Unix-based operating systems (macOS and Linux), binding to privileged port 80 requires elevated privileges. Simply run:
