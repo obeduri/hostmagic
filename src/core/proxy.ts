@@ -1523,6 +1523,9 @@ export class ReverseProxyServer {
         <label style="font-size: 0.85rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; cursor: pointer;">
           <input type="checkbox" id="autoScrollToggle" checked /> Auto-scroll
         </label>
+        <button id="copyLogsBtn" class="btn-action btn-logs" onclick="copyLogsToClipboard()">
+          📋 Copy Logs
+        </button>
         <button class="btn-action btn-logs" onclick="clearTerminalView()">
           🧹 Clear View
         </button>
@@ -1693,6 +1696,42 @@ export class ReverseProxyServer {
 
     function clearTerminalView() {
       document.getElementById('terminalOutput').innerHTML = '<div class="terminal-empty">Log view cleared. Waiting for new output...</div>';
+    }
+
+    async function copyLogsToClipboard() {
+      const terminal = document.getElementById('terminalOutput');
+      const text = terminal ? terminal.textContent : '';
+      if (!text || text.includes('Connecting to live log stream...') || text.includes('No logs recorded yet') || text.includes('Log view cleared.')) {
+        showToast('No logs to copy');
+        return;
+      }
+
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+
+        const btn = document.getElementById('copyLogsBtn');
+        const origText = btn.innerHTML;
+        btn.innerHTML = '✓ Copied!';
+        btn.style.borderColor = '#34d399';
+        btn.style.color = '#34d399';
+        showToast('Logs copied to clipboard!');
+        setTimeout(() => {
+          btn.innerHTML = origText;
+          btn.style.borderColor = '';
+          btn.style.color = '';
+        }, 2000);
+      } catch (err) {
+        showToast('Failed to copy logs');
+      }
     }
 
     async function fetchLogs() {
