@@ -93,6 +93,50 @@ export class ReverseProxyServer {
     });
   }
 
+  private static customTemplateHtml?: string;
+
+  public static getDashboardTemplate(): string {
+    return ReverseProxyServer.customTemplateHtml || ReverseProxyServer.getDefaultDashboardTemplate();
+  }
+
+  public static setDashboardTemplate(template: string): void {
+    ReverseProxyServer.customTemplateHtml = template;
+  }
+
+  public static async refreshSettingsOnGateway(
+    port: number = 80,
+    template?: string
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      const payload = JSON.stringify({
+        template: template || ReverseProxyServer.getDashboardTemplate(),
+      });
+      const req = http.request(
+        `http://127.0.0.1:${port}/__hostmagic/api/refresh-settings`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(payload),
+          },
+          timeout: 2000,
+        },
+        (res) => {
+          resolve(res.statusCode === 200);
+        }
+      );
+
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(false);
+      });
+
+      req.write(payload);
+      req.end();
+    });
+  }
+
   constructor(initialProject?: ProjectRegistration) {
     this.proxy = httpProxy.createProxyServer({
       changeOrigin: true,
@@ -442,6 +486,22 @@ export class ReverseProxyServer {
         res.end(JSON.stringify({ error: 'Invalid delete route payload' }));
         return;
       }
+
+      if (apiPath === 'refresh-settings' && req.method === 'POST') {
+        try {
+          const body = await this.readJsonBody(req);
+          if (body && body.template) {
+            ReverseProxyServer.setDashboardTemplate(body.template);
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, message: 'Settings dashboard updated' }));
+          return;
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Failed to refresh settings' }));
+          return;
+        }
+      }
     }
 
     if (url.startsWith('/__hostmagic/')) {
@@ -497,6 +557,22 @@ export class ReverseProxyServer {
             Location: '/',
           });
           res.end();
+          return;
+        }
+      }
+
+      if (url === '/__hostmagic/refresh-settings' && req.method === 'POST') {
+        try {
+          const body = await this.readJsonBody(req);
+          if (body && body.template) {
+            ReverseProxyServer.setDashboardTemplate(body.template);
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, message: 'Settings dashboard updated' }));
+          return;
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Failed to refresh settings' }));
           return;
         }
       }
@@ -850,6 +926,14 @@ export class ReverseProxyServer {
     const projectCount = this.projects.size;
     const domainCount = allRoutes.length;
 
+    const template = ReverseProxyServer.getDashboardTemplate();
+    return template
+      .replace(/\{\{INITIAL_JSON\}\}/g, initialJson)
+      .replace(/\{\{DOMAIN_COUNT\}\}/g, String(domainCount))
+      .replace(/\{\{PROJECT_COUNT\}\}/g, String(projectCount));
+  }
+
+  public static getDefaultDashboardTemplate(): string {
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1451,13 +1535,13 @@ export class ReverseProxyServer {
       <div class="metric-card">
         <div class="metric-label">Active Domains</div>
         <div class="metric-value">
-          <span id="metricDomains">${domainCount}</span>
+          <span id="metricDomains">{{DOMAIN_COUNT}}</span>
         </div>
       </div>
       <div class="metric-card">
         <div class="metric-label">Running Projects</div>
         <div class="metric-value">
-          <span id="metricProjects">${projectCount}</span>
+          <span id="metricProjects">{{PROJECT_COUNT}}</span>
         </div>
       </div>
       <div class="metric-card">
@@ -1579,7 +1663,7 @@ export class ReverseProxyServer {
   <div id="toast" class="toast"></div>
 
   <script>
-    let allRoutes = ${initialJson};
+    let allRoutes = {{INITIAL_JSON}};
     let activeLogTarget = null;
     let logInterval = null;
 
