@@ -71,13 +71,28 @@ export class ReverseProxyServer {
             }
 
             const redirectUri = parsed.searchParams.get('redirect_uri');
-            if (redirectUri && (redirectUri.includes('.test') || redirectUri.includes('.local'))) {
-              const rewrittenUri = redirectUri.replace(
-                /http:\/\/[^/]+\.(test|local)/g,
-                'http://localhost:3000'
-              );
-              parsed.searchParams.set('redirect_uri', rewrittenUri);
-              proxyRes.headers['location'] = parsed.toString();
+            if (redirectUri) {
+              let rewrittenUri = redirectUri;
+              try {
+                const parsedRedirect = new URL(redirectUri);
+                if (
+                  parsedRedirect.hostname.endsWith('.test') ||
+                  parsedRedirect.hostname.endsWith('.local') ||
+                  this.routes.has(parsedRedirect.hostname.toLowerCase())
+                ) {
+                  rewrittenUri = `http://localhost:3000${parsedRedirect.pathname}${parsedRedirect.search}${parsedRedirect.hash}`;
+                }
+              } catch {
+                rewrittenUri = redirectUri.replace(
+                  /http:\/\/[^/]+\.(test|local)/g,
+                  'http://localhost:3000'
+                );
+              }
+
+              if (rewrittenUri !== redirectUri) {
+                parsed.searchParams.set('redirect_uri', rewrittenUri);
+                proxyRes.headers['location'] = parsed.toString();
+              }
             }
           } catch {
             if (location.includes('.test') || location.includes('.local')) {
@@ -87,7 +102,38 @@ export class ReverseProxyServer {
               );
             }
           }
+        } else {
+          // If response redirects to localhost:3000 (e.g. NextAuth redirecting to callbackUrl),
+          // rewrite back to the active project domain so developer stays on their .test domain!
+          try {
+            const parsedLoc = new URL(location);
+            if (
+              (parsedLoc.hostname === 'localhost' || parsedLoc.hostname === '127.0.0.1') &&
+              parsedLoc.port === '3000' &&
+              !parsedLoc.searchParams.has('client_id')
+            ) {
+              const targetDomain =
+                (host && host !== 'localhost' && host !== '127.0.0.1' ? host : undefined) ||
+                this.lastOAuthDomain ||
+                this.getDefaultProjectDomain();
+              if (targetDomain) {
+                proxyRes.headers['location'] = `http://${targetDomain}${parsedLoc.pathname}${parsedLoc.search}${parsedLoc.hash}`;
+              }
+            }
+          } catch {}
         }
+      }
+
+      // Sanitize cookies for local development:
+      // Remove '; Domain=localhost' or '; Domain=127.0.0.1' so cookie binds to current origin
+      // Remove '; Secure' so cookie works over local HTTP
+      const rawSetCookie = proxyRes.headers['set-cookie'];
+      if (rawSetCookie) {
+        const cookies = (Array.isArray(rawSetCookie) ? rawSetCookie : [rawSetCookie]).map((c) =>
+          c.replace(/;\s*domain=(localhost|127\.0\.0\.1)/gi, '')
+           .replace(/;\s*secure/gi, '')
+        );
+        proxyRes.headers['set-cookie'] = cookies;
       }
     });
 
@@ -270,6 +316,21 @@ export class ReverseProxyServer {
           this.lastActiveProject = pName;
           break;
         }
+      }
+
+      // Zero-config OAuth: Mask all requests to auth/login endpoints through localhost:3000
+      const isAuthRequest =
+        url.startsWith('/api/auth') ||
+        url.startsWith('/auth') ||
+        url === '/login' ||
+        url.startsWith('/login?') ||
+        url.startsWith('/signin');
+
+      if (isAuthRequest) {
+        this.lastOAuthDomain = host;
+        req.headers['x-forwarded-host'] = 'localhost:3000';
+        req.headers['x-forwarded-proto'] = 'http';
+        req.headers['x-forwarded-port'] = '3000';
       }
 
       this.proxy.web(req, res, {

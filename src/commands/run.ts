@@ -121,13 +121,10 @@ export async function runCommand(): Promise<void> {
       }
       env.NEXT_PUBLIC_APP_URL = cleanUrl;
       env.VITE_APP_URL = cleanUrl;
-      // Universal OAuth: Default auth base URLs to project domain while trusting host
-      if (!env.NEXTAUTH_URL) {
-        env.NEXTAUTH_URL = cleanUrl;
-      }
-      if (!env.AUTH_URL) {
-        env.AUTH_URL = cleanUrl;
-      }
+      // Zero-config OAuth: Mask/proxy all requests to login through localhost:3000
+      // to comply with Google Cloud Console and strict OAuth 2.0 provider policies
+      env.NEXTAUTH_URL = 'http://localhost:3000';
+      env.AUTH_URL = 'http://localhost:3000';
       env.AUTH_TRUST_HOST = 'true';
     } else if (service.type === 'backend') {
       env.APP_URL = cleanUrl;
