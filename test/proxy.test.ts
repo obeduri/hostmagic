@@ -27,6 +27,18 @@ const frontServer = http.createServer((req, res) => {
     res.end();
     return;
   }
+  if (req.url?.startsWith('/_next/webpack-hmr') || req.url?.startsWith('/_next/hmr')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        service: 'frontend-hmr',
+        origin: req.headers.origin,
+        host: req.headers.host,
+        forwardedHost: req.headers['x-forwarded-host'],
+      })
+    );
+    return;
+  }
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ service: 'frontend', path: req.url }));
 });
@@ -35,6 +47,17 @@ await new Promise<void>((resolve) => frontServer.listen(frontPort, '127.0.0.1', 
 // 2. Setup mock backend server
 const backPort = await getPort();
 const backServer = http.createServer((req, res) => {
+  if (req.url?.startsWith('/api/cors-test')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        service: 'backend-cors',
+        origin: req.headers.origin,
+        host: req.headers.host,
+      })
+    );
+    return;
+  }
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ service: 'backend', path: req.url }));
 });
@@ -322,6 +345,35 @@ try {
   const refreshedHtml = await refreshedReq.text();
   assert.ok(refreshedHtml.includes('Hot Refreshed Dashboard'));
   assert.ok(refreshedHtml.includes('Custom In-Memory Reload'));
+
+  // Test 21: Next.js & Vite HMR Origin Normalization
+  console.log('Test 21: Transparent Next.js & Vite HMR Origin Normalization');
+  const hmrReq = await fetch(`http://127.0.0.1:${proxyPort}/_next/webpack-hmr`, {
+    headers: {
+      Host: 'myapp.test',
+      Origin: 'http://myapp.test',
+    },
+  });
+  assert.strictEqual(hmrReq.status, 200);
+  const hmrData = (await hmrReq.json()) as any;
+  assert.strictEqual(hmrData.service, 'frontend-hmr');
+  // Origin must be normalized to internal target port so Next.js never blocks dev resource
+  assert.strictEqual(hmrData.origin, `http://127.0.0.1:${frontPort}`);
+  assert.strictEqual(hmrData.forwardedHost, 'myapp.test');
+
+  // Test 22: Preserves cross-origin header for Backend API CORS
+  console.log('Test 22: Preserves original cross-origin header for backend API CORS');
+  const corsReq = await fetch(`http://127.0.0.1:${proxyPort}/api/cors-test`, {
+    headers: {
+      Host: 'backend.myapp.test',
+      Origin: 'http://myapp.test',
+    },
+  });
+  assert.strictEqual(corsReq.status, 200);
+  const corsData = (await corsReq.json()) as any;
+  assert.strictEqual(corsData.service, 'backend-cors');
+  // Origin must be preserved intact for cross-domain API requests so backend CORS works
+  assert.strictEqual(corsData.origin, 'http://myapp.test');
 
   // Reset template back to default
   ReverseProxyServer.setDashboardTemplate('');

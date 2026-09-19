@@ -244,6 +244,14 @@ export class ReverseProxyServer {
         );
         proxyRes.headers['set-cookie'] = cookies;
       }
+
+      // Sanitize Access-Control-Allow-Origin for local development HMR/API:
+      const allowOrigin = proxyRes.headers['access-control-allow-origin'];
+      if (allowOrigin && (allowOrigin.includes('127.0.0.1') || allowOrigin.includes('localhost'))) {
+        if (host && host !== 'localhost' && host !== '127.0.0.1') {
+          proxyRes.headers['access-control-allow-origin'] = `http://${host}`;
+        }
+      }
     });
 
     // Error handler for proxy errors (e.g. backend service still spinning up)
@@ -638,6 +646,39 @@ export class ReverseProxyServer {
         req.headers['x-forwarded-port'] = '3000';
       }
 
+      // Transparent HMR & Fast Refresh Support for Next.js, Vite, and Astro:
+      // When dev servers (Next.js 14.2+, Next.js 15, Vite, etc.) receive HMR requests
+      // (like /_next/webpack-hmr, /_next/hmr, or dev polling), they check the Origin header.
+      // If Origin is http://my-app.test while the internal server is on localhost:PORT,
+      // Next.js blocks the request with:
+      // "Blocked cross-origin request to Next.js dev resource /_next/hmr from my-app.test"
+      // By normalizing the Origin to match the internal target (or same-origin to host),
+      // dev servers recognize the request as same-origin, guaranteeing 100% reliable Fast Refresh!
+      const isDevResource =
+        url.startsWith('/_next/') ||
+        url.startsWith('/@vite') ||
+        url.startsWith('/__vite') ||
+        url.startsWith('/_astro') ||
+        url.includes('webpack-hmr') ||
+        url.includes('hot-update') ||
+        url.includes('hmr');
+
+      const rawOrigin = req.headers.origin;
+      const isSameOriginToHost =
+        rawOrigin &&
+        (rawOrigin === `http://${host}` ||
+         rawOrigin === `https://${host}` ||
+         rawOrigin === `http://${rawHost}` ||
+         rawOrigin === `https://${rawHost}`);
+
+      if (isDevResource || isSameOriginToHost) {
+        req.headers['x-forwarded-host'] = rawHost;
+        req.headers['x-forwarded-proto'] = 'http';
+        if (req.headers.origin) {
+          req.headers.origin = `http://127.0.0.1:${targetPort}`;
+        }
+      }
+
       this.proxy.web(req, res, {
         target: `http://127.0.0.1:${targetPort}`,
       });
@@ -663,8 +704,21 @@ export class ReverseProxyServer {
     }
 
     if (targetPort) {
+      // Preserve original host in forwarded headers
+      req.headers['x-forwarded-host'] = rawHost;
+      req.headers['x-forwarded-proto'] = 'http';
+
+      // Normalize Origin for WebSocket HMR (Next.js Fast Refresh, Vite HMR, Astro HMR)
+      // When the browser connects from http://<app>.test, Next.js 14/15 and Vite WebSocket
+      // servers check whether Origin matches the internal listening address.
+      // Normalizing Origin ensures HMR WebSockets are never blocked by cross-origin checks!
+      if (req.headers.origin) {
+        req.headers.origin = `http://127.0.0.1:${targetPort}`;
+      }
+
       this.proxy.ws(req, socket, head, {
         target: `ws://127.0.0.1:${targetPort}`,
+        changeOrigin: true,
       });
     } else {
       socket.destroy();
