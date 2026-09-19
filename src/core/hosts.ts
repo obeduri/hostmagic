@@ -53,14 +53,18 @@ export function updateHostsContent(
   const eol = currentContent.includes('\r\n') ? '\r\n' : '\n';
   const newBlock = formatBlock(projectName, domains, eol);
 
-  // Regex matches both named project block and legacy non-named block
+  // Clean up any orphaned legacy artifacts like ":projectName" on their own line
+  const cleanedContent = currentContent.replace(/^[ \t]*:[a-zA-Z0-9_-]+[ \t]*(?:\r?\n|$)/gm, '');
+
+  // Regex matches exact named project block
   const namedRegex = new RegExp(
-    `# BEGIN hostmagic:${escapeRegex(projectName)}[\\s\\S]*?# END hostmagic:${escapeRegex(projectName)}(\\r?\\n)?`,
+    `# BEGIN hostmagic:${escapeRegex(projectName)}[\\s\\S]*?# END hostmagic:${escapeRegex(projectName)}(?:\\r?\\n)?`,
     'g'
   );
-  const legacyRegex = /# BEGIN hostmagic[\s\S]*?# END hostmagic(\r?\n)?/g;
+  // Matches legacy non-named hostmagic block strictly without :projectName
+  const legacyRegex = /# BEGIN hostmagic[ \t]*(?:\r?\n)[\s\S]*?# END hostmagic[ \t]*(?:\r?\n)?/g;
 
-  let updated = currentContent;
+  let updated = cleanedContent;
 
   if (namedRegex.test(updated)) {
     updated = updated.replace(namedRegex, newBlock + eol);
@@ -92,7 +96,13 @@ export function removeHostsContent(currentContent: string, projectName?: string)
     );
   }
 
-  const updated = currentContent.replace(regex, '');
+  let updated = currentContent.replace(regex, '');
+  if (projectName && projectName !== '*') {
+    const orphanRegex = new RegExp(`^[ \\t]*:${escapeRegex(projectName)}[ \\t]*(?:\\r?\\n|$)`, 'gm');
+    updated = updated.replace(orphanRegex, '');
+  } else {
+    updated = updated.replace(/^[ \\t]*:[a-zA-Z0-9_-]+[ \\t]*(?:\\r?\\n|$)/gm, '');
+  }
   return updated.trimEnd() + eol;
 }
 

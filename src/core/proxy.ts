@@ -217,7 +217,7 @@ export class ReverseProxyServer {
         res.end(
           JSON.stringify({
             hostmagic: true,
-            version: '1.0.4',
+            version: '1.0.5',
             projects: Array.from(this.projects.values()),
           })
         );
