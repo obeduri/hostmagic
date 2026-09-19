@@ -1,6 +1,6 @@
 {
   "name": "hostmagic",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Automate local fullstack dev with .test domains, ephemeral ports, and universal OAuth 2.0 across macOS, Linux, and Windows",
   "type": "module",
   "main": "dist/cli.js",
@@ -9,7 +9,8 @@
     "hm": "dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "hostmagic-logo.png"
   ],
   "scripts": {
     "build": "tsup",

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/obeduri/hostmagic/master/hostmagic-logo.png" alt="Hostmagic - Developer CLI for seamless local fullstack development" width="720" style="max-width: 100%; border-radius: 14px;">
+</p>
+
 # 🧙‍♂️ Hostmagic
 
 > Automate local fullstack development with clean `.test` domains, zero-conflict ephemeral ports, universal OAuth 2.0 support, and concurrent service execution across Windows, macOS, and Linux.
