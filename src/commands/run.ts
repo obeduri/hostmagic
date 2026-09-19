@@ -5,6 +5,7 @@ import pc from 'picocolors';
 import { allocateUniquePorts } from '../core/port.js';
 import { ProcessManager } from '../core/process-manager.js';
 import { ReverseProxyServer } from '../core/proxy.js';
+import { ensureSystemHostsEntry } from '../core/hosts.js';
 import {
   freePortIfOccupied,
   checkAndCleanNextLock,
@@ -37,6 +38,13 @@ export async function runCommand(): Promise<void> {
   if (!config.services || config.services.length === 0) {
     console.error(pc.red('No services configured in .hostmagic.json.'));
     process.exit(1);
+  }
+
+  // Ensure hostmagic.settings is registered in system hosts file
+  try {
+    await ensureSystemHostsEntry();
+  } catch {
+    // Non-fatal if permissions not yet elevated
   }
 
   // Ensure every service has a persistent dedicated random port (never standard 3000/3001)
@@ -146,6 +154,8 @@ export async function runCommand(): Promise<void> {
   const proxyRoutes = runtimeServices.map((s) => ({
     domain: s.service.domain,
     targetPort: s.port,
+    serviceName: s.service.name,
+    type: s.service.type,
   }));
   const frontendRuntime = runtimeServices.find((s) => s.service.type === 'frontend');
 
@@ -176,6 +186,10 @@ export async function runCommand(): Promise<void> {
 
   // 5. Initialize Process Manager and register shutdown hooks
   const manager = new ProcessManager();
+  if (isGatewayActive) {
+    manager.setGatewayPort(80);
+  }
+
   manager.onStop(async () => {
     if (proxyServer) {
       await proxyServer.stop();
@@ -195,14 +209,21 @@ export async function runCommand(): Promise<void> {
   await manager.waitForAll();
 }
 
+function stripAnsi(str: string): string {
+  return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+}
+
+function padBannerLine(content: string, width = 64): string {
+  const visibleLength = stripAnsi(content).length;
+  const padding = Math.max(0, width - visibleLength);
+  return pc.magenta('│') + content + ' '.repeat(padding) + pc.magenta('│');
+}
+
 function printBanner(projectName: string, services: ServiceRuntimeInfo[], isGatewayClient?: boolean): void {
   const line = '─'.repeat(64);
   console.log(pc.magenta(`┌${line}┐`));
   console.log(
-    pc.magenta(`│`) +
-    pc.bold(`  🚀 Hostmagic is running clean domains for [${pc.cyan(projectName)}]`) +
-    ' '.repeat(Math.max(0, 62 - (43 + projectName.length))) +
-    pc.magenta(`│`)
+    padBannerLine(`  🚀 Hostmagic running [${pc.cyan(projectName)}]`)
   );
   console.log(pc.magenta(`├${line}┤`));
 
@@ -215,32 +236,25 @@ function printBanner(projectName: string, services: ServiceRuntimeInfo[], isGate
         : pc.yellow('[CUSTOM]  ');
 
     const entry = `  • ${role} ${pc.bold(info.service.name)}: ${pc.underline(pc.green(info.url))}`;
-    console.log(
-      pc.magenta(`│`) + entry + ' '.repeat(Math.max(0, 73 - (info.service.name.length + info.url.length))) + pc.magenta(`│`)
-    );
+    console.log(padBannerLine(entry));
   }
 
+  // Settings Dashboard URL
+  const settingsEntry = `  • ${pc.cyan('[SETTINGS]')} ${pc.bold('hostmagic.settings')}: ${pc.underline(pc.green('http://hostmagic.settings'))}`;
+  console.log(padBannerLine(settingsEntry));
+
   if (services.some((s) => s.service.type === 'frontend')) {
-    const oauth = `  • ${pc.blue('[OAUTH]   ')} ${pc.bold('localhost:3000')}: ${pc.underline(pc.green('http://localhost:3000'))} ${pc.dim('(OAuth callback bridge)')}`;
-    console.log(
-      pc.magenta(`│`) + oauth + ' '.repeat(Math.max(0, 73 - (9 + 21 + 25))) + pc.magenta(`│`)
-    );
+    const oauth = `  • ${pc.blue('[OAUTH]   ')} ${pc.bold('localhost:3000')}: ${pc.underline(pc.green('http://localhost:3000'))} ${pc.dim('(OAuth)')}`;
+    console.log(padBannerLine(oauth));
   }
 
   console.log(pc.magenta(`├${line}┤`));
   const proxyMsg = isGatewayClient
-    ? '  ⚡ Joined shared Port 80 Gateway (multi-project concurrent mode) '
+    ? '  ⚡ Joined shared Port 80 Gateway (multi-project concurrent mode)'
     : '  ⚡ Port 80 Gateway active (multi-project concurrent reverse proxy)';
+  console.log(padBannerLine(pc.dim(proxyMsg)));
   console.log(
-    pc.magenta(`│`) +
-    pc.dim(proxyMsg) +
-    ' '.repeat(Math.max(0, 64 - proxyMsg.length)) +
-    pc.magenta(`│`)
-  );
-  console.log(
-    pc.magenta(`│`) +
-    pc.dim('  Press ESC or Ctrl+C at any time to gracefully stop all services. ') +
-    pc.magenta(`│`)
+    padBannerLine(pc.dim('  Press ESC or Ctrl+C at any time to gracefully stop all services.'))
   );
   console.log(pc.magenta(`└${line}┘\n`));
 }

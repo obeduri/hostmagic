@@ -5,6 +5,8 @@ import os from 'node:os';
 import { execa } from 'execa';
 import { flushDnsCache } from './dns.js';
 
+export const HOSTMAGIC_SETTINGS_DOMAIN = 'hostmagic.settings';
+
 export function getHostsPath(): string {
   if (process.platform === 'win32') {
     const systemRoot = process.env.SystemRoot || 'C:\\Windows';
@@ -196,6 +198,7 @@ export async function writeHosts(newContent: string): Promise<void> {
 
 /**
  * Reads hosts file content, updates block for projectName with given domains, and writes it back.
+ * Also ensures hostmagic.settings is always mapped to 127.0.0.1.
  */
 export async function syncHostsBlock(projectName: string, domains: string[]): Promise<void> {
   const hostsPath = getHostsPath();
@@ -203,8 +206,28 @@ export async function syncHostsBlock(projectName: string, domains: string[]): Pr
     ? await fs.readFile(hostsPath, 'utf-8')
     : '';
 
-  const newContent = updateHostsContent(currentContent, projectName, domains);
+  let withSystem = currentContent;
+  if (!withSystem.includes(HOSTMAGIC_SETTINGS_DOMAIN)) {
+    withSystem = updateHostsContent(withSystem, 'system', [HOSTMAGIC_SETTINGS_DOMAIN]);
+  }
+
+  const newContent = updateHostsContent(withSystem, projectName, domains);
   await writeHosts(newContent);
+}
+
+/**
+ * Ensures 127.0.0.1 hostmagic.settings is present in the system hosts file.
+ */
+export async function ensureSystemHostsEntry(): Promise<void> {
+  const hostsPath = getHostsPath();
+  const currentContent = existsSync(hostsPath)
+    ? await fs.readFile(hostsPath, 'utf-8')
+    : '';
+
+  if (!currentContent.includes(HOSTMAGIC_SETTINGS_DOMAIN)) {
+    const updated = updateHostsContent(currentContent, 'system', [HOSTMAGIC_SETTINGS_DOMAIN]);
+    await writeHosts(updated);
+  }
 }
 
 /**

@@ -1,10 +1,13 @@
 import http from 'node:http';
 import httpProxy from 'http-proxy';
 import pc from 'picocolors';
+import { syncHostsBlock, HOSTMAGIC_SETTINGS_DOMAIN } from './hosts.js';
 
 export interface ProxyRoute {
   domain: string;
   targetPort: number;
+  serviceName?: string;
+  type?: 'frontend' | 'backend' | 'custom' | string;
 }
 
 export interface ProjectRegistration {
@@ -27,6 +30,68 @@ export class ReverseProxyServer {
   > = new Map();
   private lastOAuthDomain?: string;
   private lastActiveProject?: string;
+
+  private static logBuffers: Map<string, string[]> = new Map();
+  private static MAX_LOG_LINES = 1000;
+
+  public static appendLog(key: string, line: string): void {
+    const cleanKey = key.toLowerCase().trim();
+    let buffer = ReverseProxyServer.logBuffers.get(cleanKey);
+    if (!buffer) {
+      buffer = [];
+      ReverseProxyServer.logBuffers.set(cleanKey, buffer);
+    }
+    buffer.push(line);
+    if (buffer.length > ReverseProxyServer.MAX_LOG_LINES) {
+      buffer.shift();
+    }
+  }
+
+  public static getLogs(key: string): string[] {
+    const cleanKey = key.toLowerCase().trim();
+    return ReverseProxyServer.logBuffers.get(cleanKey) || [];
+  }
+
+  public static clearLogs(key?: string): void {
+    if (key) {
+      ReverseProxyServer.logBuffers.delete(key.toLowerCase().trim());
+    } else {
+      ReverseProxyServer.logBuffers.clear();
+    }
+  }
+
+  public static async pushLogsToGateway(
+    port: number = 80,
+    target: string,
+    lines: string[]
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      const payload = JSON.stringify({ target, lines });
+      const req = http.request(
+        `http://127.0.0.1:${port}/__hostmagic/api/logs/push`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(payload),
+          },
+          timeout: 2000,
+        },
+        (res) => {
+          resolve(res.statusCode === 200);
+        }
+      );
+
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(false);
+      });
+
+      req.write(payload);
+      req.end();
+    });
+  }
 
   constructor(initialProject?: ProjectRegistration) {
     this.proxy = httpProxy.createProxyServer({
@@ -191,9 +256,15 @@ export class ReverseProxyServer {
     const host = rawHost.split(':')[0].toLowerCase();
     const url = req.url || '/';
 
+    const isSettingsHost =
+      host === HOSTMAGIC_SETTINGS_DOMAIN ||
+      host === 'settings.hostmagic' ||
+      host.startsWith('hostmagic.settings:') ||
+      host.startsWith('settings.hostmagic:');
+
     // Track active OAuth origin when auth initiation request arrives on a project domain
     if (url.includes('/api/auth') || url.includes('/auth/')) {
-      if (host && host !== 'localhost' && host !== '127.0.0.1') {
+      if (host && host !== 'localhost' && host !== '127.0.0.1' && !isSettingsHost) {
         this.lastOAuthDomain = host;
         for (const [pName, p] of this.projects.entries()) {
           if (p.routes.some((r) => r.domain === host)) {
@@ -204,11 +275,173 @@ export class ReverseProxyServer {
       }
     }
 
-    // 1. Internal Hostmagic Gateway Control Endpoints
-    if (url === '/__hostmagic' || url === '/__hostmagic/' || url === '/__hostmagic/hub') {
+    // 1. Hostmagic Settings & Hub Dashboard
+    if (
+      (isSettingsHost && (url === '/' || url === '' || url === '/settings' || url === '/dashboard')) ||
+      url === '/__hostmagic' ||
+      url === '/__hostmagic/' ||
+      url === '/__hostmagic/hub' ||
+      url === '/__hostmagic/settings'
+    ) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(this.renderGatewayHubHtml());
+      res.end(this.renderSettingsDashboardHtml());
       return;
+    }
+
+    // 2. Hostmagic Settings & Logs REST API
+    const isApiRequest = url.startsWith('/__hostmagic/api/') || (isSettingsHost && url.startsWith('/api/'));
+    if (isApiRequest) {
+      const apiPath = url.startsWith('/__hostmagic/api/')
+        ? url.slice('/__hostmagic/api/'.length).split('?')[0]
+        : url.slice('/api/'.length).split('?')[0];
+
+      if (apiPath === 'status' && req.method === 'GET') {
+        const allRoutes: Array<{
+          domain: string;
+          targetPort: number;
+          projectName: string;
+          serviceName: string;
+          type: string;
+        }> = [];
+
+        for (const [pName, p] of this.projects.entries()) {
+          for (const r of p.routes) {
+            allRoutes.push({
+              domain: r.domain,
+              targetPort: r.targetPort,
+              projectName: pName,
+              serviceName: r.serviceName || r.domain.split('.')[0],
+              type: r.type || (p.frontendPort === r.targetPort ? 'frontend' : 'custom'),
+            });
+          }
+        }
+
+        for (const [domain, port] of this.routes.entries()) {
+          if (!allRoutes.some((r) => r.domain.toLowerCase() === domain.toLowerCase())) {
+            allRoutes.push({
+              domain,
+              targetPort: port,
+              projectName: 'standalone',
+              serviceName: domain.split('.')[0],
+              type: 'custom',
+            });
+          }
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            hostmagic: true,
+            version: '1.0.6',
+            projects: Array.from(this.projects.values()),
+            routes: allRoutes,
+          })
+        );
+        return;
+      }
+
+      if (apiPath === 'logs' && req.method === 'GET') {
+        const parsedUrl = new URL(url, `http://${rawHost}`);
+        const target = parsedUrl.searchParams.get('target') || '';
+        const logs = ReverseProxyServer.getLogs(target);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ target, logs }));
+        return;
+      }
+
+      if (apiPath === 'logs/push' && req.method === 'POST') {
+        try {
+          const body = await this.readJsonBody(req);
+          if (body) {
+            const lines: string[] = Array.isArray(body.lines) ? body.lines : [body.line || ''];
+            const targets: string[] = [body.target, body.domain, body.name].filter(Boolean);
+            for (const t of targets) {
+              for (const line of lines) {
+                if (line) ReverseProxyServer.appendLog(t, line);
+              }
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, count: lines.length }));
+            return;
+          }
+        } catch {}
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid logs payload' }));
+        return;
+      }
+
+      if (apiPath === 'routes' && req.method === 'POST') {
+        try {
+          const body = await this.readJsonBody(req);
+          if (body && body.domain && body.targetPort) {
+            const cleanDomain = String(body.domain).toLowerCase().trim();
+            const portNum = parseInt(String(body.targetPort), 10);
+            const projName = String(body.name || body.projectName || 'custom').trim();
+            const sName = String(body.serviceName || cleanDomain.split('.')[0]).trim();
+            const sType = String(body.type || 'custom').trim();
+
+            this.registerRoute(cleanDomain, portNum);
+
+            let proj = this.projects.get(projName);
+            if (!proj) {
+              proj = { name: projName, routes: [] };
+              this.projects.set(projName, proj);
+            }
+            proj.routes = proj.routes.filter((r) => r.domain.toLowerCase() !== cleanDomain);
+            proj.routes.push({
+              domain: cleanDomain,
+              targetPort: portNum,
+              serviceName: sName,
+              type: sType,
+            });
+
+            try {
+              await syncHostsBlock(projName, proj.routes.map((r) => r.domain));
+            } catch {}
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(
+              JSON.stringify({
+                success: true,
+                route: { domain: cleanDomain, targetPort: portNum, projectName: projName },
+              })
+            );
+            return;
+          }
+        } catch {}
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid route payload' }));
+        return;
+      }
+
+      if (apiPath === 'routes' && req.method === 'DELETE') {
+        try {
+          const body = await this.readJsonBody(req);
+          if (body && (body.domain || body.name)) {
+            const cleanDomain = body.domain ? String(body.domain).toLowerCase().trim() : undefined;
+            const projName = body.name || body.projectName;
+
+            if (cleanDomain) {
+              this.routes.delete(cleanDomain);
+              for (const [pName, p] of this.projects.entries()) {
+                p.routes = p.routes.filter((r) => r.domain.toLowerCase() !== cleanDomain);
+                if (p.routes.length === 0 && (!projName || projName === pName)) {
+                  this.projects.delete(pName);
+                }
+              }
+            } else if (projName) {
+              this.unregisterProject(projName);
+            }
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, deleted: cleanDomain || projName }));
+            return;
+          }
+        } catch {}
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid delete route payload' }));
+        return;
+      }
     }
 
     if (url.startsWith('/__hostmagic/')) {
@@ -217,7 +450,7 @@ export class ReverseProxyServer {
         res.end(
           JSON.stringify({
             hostmagic: true,
-            version: '1.0.5',
+            version: '1.0.6',
             projects: Array.from(this.projects.values()),
           })
         );
@@ -233,9 +466,7 @@ export class ReverseProxyServer {
             res.end(JSON.stringify({ success: true, project: body.name }));
             return;
           }
-        } catch {
-          // Bad payload
-        }
+        } catch {}
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid project payload' }));
         return;
@@ -250,9 +481,7 @@ export class ReverseProxyServer {
             res.end(JSON.stringify({ success: true, unregistered: body.name }));
             return;
           }
-        } catch {
-          // Bad payload
-        }
+        } catch {}
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid project payload' }));
         return;
@@ -580,63 +809,991 @@ export class ReverseProxyServer {
     });
   }
 
-  private renderGatewayHubHtml(): string {
-    const projectList = Array.from(this.projects.values());
-    const projectCards = projectList
-      .map((p) => {
-        const domainLinks = p.routes
-          .map(
-            (r) =>
-              `<a href="http://${r.domain}" target="_blank" style="color: #38bdf8; text-decoration: none; margin-right: 12px; font-weight: 500;">
-                🌐 ${r.domain} <span style="color: #64748b; font-size: 0.85em;">(:${r.targetPort})</span>
-              </a>`
-          )
-          .join('');
+  public renderGatewayHubHtml(): string {
+    return this.renderSettingsDashboardHtml();
+  }
 
-        const selectButton = p.frontendPort
-          ? `<a href="/__hostmagic/select-target?project=${encodeURIComponent(p.name)}" 
-                style="background: #8b5cf6; color: white; padding: 6px 14px; border-radius: 6px; text-decoration: none; font-size: 0.85em; font-weight: 600;">
-                Set as localhost OAuth target
-             </a>`
-          : '';
+  public renderSettingsDashboardHtml(): string {
+    const allRoutes: Array<{
+      domain: string;
+      targetPort: number;
+      projectName: string;
+      serviceName: string;
+      type: string;
+    }> = [];
 
-        return `
-          <div style="background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 18px 24px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
-            <div>
-              <div style="font-size: 1.15rem; font-weight: 700; color: #f1f5f9; margin-bottom: 6px;">
-                🚀 ${p.name}
+    for (const [pName, p] of this.projects.entries()) {
+      for (const r of p.routes) {
+        allRoutes.push({
+          domain: r.domain,
+          targetPort: r.targetPort,
+          projectName: pName,
+          serviceName: r.serviceName || r.domain.split('.')[0],
+          type: r.type || (p.frontendPort === r.targetPort ? 'frontend' : 'custom'),
+        });
+      }
+    }
+
+    for (const [domain, port] of this.routes.entries()) {
+      if (!allRoutes.some((r) => r.domain.toLowerCase() === domain.toLowerCase())) {
+        allRoutes.push({
+          domain,
+          targetPort: port,
+          projectName: 'standalone',
+          serviceName: domain.split('.')[0],
+          type: 'custom',
+        });
+      }
+    }
+
+    const initialJson = JSON.stringify(allRoutes).replace(/</g, '\\u003c');
+    const projectCount = this.projects.size;
+    const domainCount = allRoutes.length;
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hostmagic Settings & Gateway</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #07090e;
+      --card-bg: rgba(15, 23, 42, 0.75);
+      --card-border: rgba(51, 65, 85, 0.6);
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #a855f7;
+      --primary-hover: #9333ea;
+      --primary-glow: rgba(168, 85, 247, 0.25);
+      --cyan: #38bdf8;
+      --cyan-glow: rgba(56, 189, 248, 0.2);
+      --emerald: #10b981;
+      --rose: #f43f5e;
+      --amber: #fbbf24;
+      --dialog-bg: #0d1321;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(168, 85, 247, 0.12) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(56, 189, 248, 0.08) 0px, transparent 50%);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 40px 24px;
+      line-height: 1.5;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+      margin-bottom: 32px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-icon {
+      font-size: 2.2rem;
+      background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(56, 189, 248, 0.2));
+      border: 1px solid rgba(168, 85, 247, 0.4);
+      border-radius: 14px;
+      width: 52px;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 20px var(--primary-glow);
+    }
+
+    .brand-title h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      background: linear-gradient(to right, #f8fafc, #c084fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-title p {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      margin-top: 2px;
+    }
+
+    .domain-badge {
+      font-size: 0.75rem;
+      background: rgba(168, 85, 247, 0.15);
+      color: #d8b4fe;
+      border: 1px solid rgba(168, 85, 247, 0.3);
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 500;
+      letter-spacing: normal;
+      -webkit-text-fill-color: #d8b4fe;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      border: none;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary), #7c3aed);
+      color: white;
+      box-shadow: 0 4px 14px var(--primary-glow);
+    }
+
+    .btn-primary:hover {
+      background: linear-gradient(135deg, var(--primary-hover), #6d28d9);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px var(--primary-glow);
+    }
+
+    .btn-secondary {
+      background: rgba(30, 41, 59, 0.8);
+      color: var(--text);
+      border: 1px solid var(--card-border);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(51, 65, 85, 0.8);
+      border-color: #64748b;
+    }
+
+    /* Metrics Grid */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .metric-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: border-color 0.2s;
+    }
+
+    .metric-card:hover {
+      border-color: rgba(168, 85, 247, 0.4);
+    }
+
+    .metric-label {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .metric-value {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      background: var(--emerald);
+      border-radius: 50%;
+      box-shadow: 0 0 10px var(--emerald);
+      animation: pulse-dot 2s infinite;
+      display: inline-block;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+
+    /* Main Table Card */
+    .table-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    }
+
+    .table-header-bar {
+      padding: 18px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      border-bottom: 1px solid var(--card-border);
+      background: rgba(15, 23, 42, 0.5);
+    }
+
+    .table-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .search-input {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 8px 14px;
+      color: var(--text);
+      font-size: 0.85rem;
+      width: 260px;
+      transition: all 0.2s;
+    }
+
+    .search-input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px var(--primary-glow);
+    }
+
+    /* Table styling */
+    .table-responsive {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.9rem;
+    }
+
+    th {
+      background: rgba(30, 41, 59, 0.5);
+      padding: 12px 20px;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      font-weight: 600;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    td {
+      padding: 16px 20px;
+      border-bottom: 1px solid rgba(51, 65, 85, 0.3);
+      vertical-align: middle;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr:hover td {
+      background: rgba(30, 41, 59, 0.35);
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .badge-project {
+      background: rgba(148, 163, 184, 0.12);
+      color: #cbd5e1;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+    }
+
+    .badge-frontend {
+      background: rgba(56, 189, 248, 0.12);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+
+    .badge-backend {
+      background: rgba(192, 132, 252, 0.12);
+      color: #c084fc;
+      border: 1px solid rgba(192, 132, 252, 0.3);
+    }
+
+    .badge-custom {
+      background: rgba(251, 191, 36, 0.12);
+      color: #fbbf24;
+      border: 1px solid rgba(251, 191, 36, 0.3);
+    }
+
+    .badge-status-live {
+      background: rgba(16, 185, 129, 0.12);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .domain-link {
+      color: var(--cyan);
+      text-decoration: none;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: color 0.15s;
+    }
+
+    .domain-link:hover {
+      color: #7dd3fc;
+      text-decoration: underline;
+    }
+
+    .port-tag {
+      font-family: 'JetBrains Mono', monospace;
+      color: #94a3b8;
+      font-size: 0.85rem;
+      background: rgba(15, 23, 42, 0.6);
+      padding: 2px 7px;
+      border-radius: 4px;
+      border: 1px solid rgba(51, 65, 85, 0.4);
+    }
+
+    .action-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-action {
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+    }
+
+    .btn-logs {
+      background: rgba(56, 189, 248, 0.1);
+      color: #38bdf8;
+      border-color: rgba(56, 189, 248, 0.25);
+    }
+
+    .btn-logs:hover {
+      background: rgba(56, 189, 248, 0.2);
+      border-color: #38bdf8;
+    }
+
+    .btn-delete {
+      background: rgba(244, 63, 94, 0.1);
+      color: #f43f5e;
+      border-color: rgba(244, 63, 94, 0.25);
+    }
+
+    .btn-delete:hover {
+      background: rgba(244, 63, 94, 0.2);
+      border-color: #f43f5e;
+    }
+
+    /* Native HTML Dialogs */
+    dialog {
+      background: var(--dialog-bg);
+      color: var(--text);
+      border: 1px solid rgba(71, 85, 105, 0.8);
+      border-radius: 14px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
+      max-width: 860px;
+      width: 92vw;
+      margin: auto;
+      padding: 0;
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+    }
+
+    dialog::backdrop {
+      background: rgba(3, 7, 18, 0.75);
+      backdrop-filter: blur(6px);
+    }
+
+    .dialog-header {
+      padding: 18px 24px;
+      background: rgba(15, 23, 42, 0.8);
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .dialog-header h3 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #f8fafc;
+    }
+
+    .dialog-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .dialog-close-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.3rem;
+      cursor: pointer;
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+
+    .dialog-close-btn:hover {
+      background: rgba(244, 63, 94, 0.2);
+      color: #f43f5e;
+    }
+
+    .dialog-body {
+      padding: 24px;
+    }
+
+    /* Terminal Output */
+    .terminal-container {
+      background: #030712;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      height: 480px;
+      overflow-y: auto;
+      padding: 16px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      line-height: 1.6;
+      color: #e2e8f0;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .terminal-container::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .terminal-container::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+
+    .terminal-empty {
+      color: #64748b;
+      text-align: center;
+      margin-top: 180px;
+      font-style: italic;
+    }
+
+    /* Form Fields */
+    .form-group {
+      margin-bottom: 18px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #cbd5e1;
+    }
+
+    .form-control {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--text);
+      font-size: 0.9rem;
+      font-family: inherit;
+      transition: all 0.2s;
+    }
+
+    .form-control:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px var(--primary-glow);
+    }
+
+    .dialog-footer {
+      padding: 16px 24px;
+      background: rgba(15, 23, 42, 0.8);
+      border-top: 1px solid var(--card-border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #1e293b;
+      color: #f8fafc;
+      border: 1px solid var(--primary);
+      padding: 12px 20px;
+      border-radius: 8px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
+      font-size: 0.9rem;
+      font-weight: 500;
+      z-index: 9999;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all 0.25s ease;
+      pointer-events: none;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand">
+        <div class="brand-icon">🧙‍♂️</div>
+        <div class="brand-title">
+          <h1>
+            Hostmagic Settings
+            <span class="domain-badge">hostmagic.settings</span>
+          </h1>
+          <p>🧙‍♂️ Hostmagic Gateway &bull; Universal Reverse Proxy &bull; Port 80 &bull; Realtime Domain Hub</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-secondary" onclick="loadRoutes(true)">
+          🔄 Refresh
+        </button>
+        <button class="btn btn-primary" onclick="openAddModal()">
+          ➕ Add Domain / Service
+        </button>
+      </div>
+    </header>
+
+    <!-- Metrics Grid -->
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-label">Active Domains</div>
+        <div class="metric-value">
+          <span id="metricDomains">${domainCount}</span>
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Running Projects</div>
+        <div class="metric-value">
+          <span id="metricProjects">${projectCount}</span>
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Reverse Proxy Engine</div>
+        <div class="metric-value">
+          <span class="live-dot"></span> Port 80
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">OAuth 2.0 Bridge</div>
+        <div class="metric-value" style="font-size: 1.1rem; color: #38bdf8;">
+          localhost:3000
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Table Card -->
+    <div class="table-card">
+      <div class="table-header-bar">
+        <div class="table-title">
+          🌐 Registered Services & Routing Table
+        </div>
+        <input 
+          type="text" 
+          id="searchInput" 
+          class="search-input" 
+          placeholder="Filter by domain, name, or port..." 
+          oninput="filterTable()"
+        />
+      </div>
+
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>Project</th>
+              <th>Service</th>
+              <th>Domain</th>
+              <th>Internal Port</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="routesTableBody">
+            <!-- Dynamically populated -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- HTML5 Native Dialog for Logs -->
+  <dialog id="logModal">
+    <div class="dialog-header">
+      <h3>
+        📋 Logs: <span id="logModalTarget" style="color: var(--cyan);">service</span>
+        <span class="badge badge-status-live" style="margin-left: 8px;">
+          <span class="live-dot"></span> Live
+        </span>
+      </h3>
+      <div class="dialog-controls">
+        <label style="font-size: 0.85rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; cursor: pointer;">
+          <input type="checkbox" id="autoScrollToggle" checked /> Auto-scroll
+        </label>
+        <button class="btn-action btn-logs" onclick="clearTerminalView()">
+          🧹 Clear View
+        </button>
+        <button class="dialog-close-btn" onclick="closeLogModal()">✕</button>
+      </div>
+    </div>
+    <div class="dialog-body">
+      <div id="terminalOutput" class="terminal-container"></div>
+    </div>
+  </dialog>
+
+  <!-- HTML5 Native Dialog for Adding Domain/Service -->
+  <dialog id="addModal">
+    <div class="dialog-header">
+      <h3>➕ Register New Domain / Service</h3>
+      <button class="dialog-close-btn" onclick="closeAddModal()">✕</button>
+    </div>
+    <div class="dialog-body">
+      <div class="form-group">
+        <label for="addProject">Project Name</label>
+        <input type="text" id="addProject" class="form-control" placeholder="e.g. reparando" />
+      </div>
+      <div class="form-group">
+        <label for="addService">Service Name</label>
+        <input type="text" id="addService" class="form-control" placeholder="e.g. web, api, docs" />
+      </div>
+      <div class="form-group">
+        <label for="addDomain">Domain Name (will resolve on port 80)</label>
+        <input type="text" id="addDomain" class="form-control" placeholder="e.g. admin.reparando.test" />
+      </div>
+      <div class="form-group">
+        <label for="addPort">Internal Target Port</label>
+        <input type="number" id="addPort" class="form-control" placeholder="e.g. 5173, 4000" />
+      </div>
+      <div class="form-group">
+        <label for="addType">Service Role</label>
+        <select id="addType" class="form-control">
+          <option value="frontend">Frontend Application</option>
+          <option value="backend">Backend API</option>
+          <option value="custom" selected>Custom Service</option>
+        </select>
+      </div>
+    </div>
+    <div class="dialog-footer">
+      <button class="btn btn-secondary" onclick="closeAddModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitNewRoute()">Register Domain</button>
+    </div>
+  </dialog>
+
+  <!-- Toast Element -->
+  <div id="toast" class="toast"></div>
+
+  <script>
+    let allRoutes = ${initialJson};
+    let activeLogTarget = null;
+    let logInterval = null;
+
+    function cleanAnsi(str) {
+      if (!str) return '';
+      return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 3000);
+    }
+
+    function renderTable(routesToRender) {
+      const tbody = document.getElementById('routesTableBody');
+      if (!routesToRender || routesToRender.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #64748b; padding: 32px;">No active domains found.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = routesToRender.map(r => {
+        const typeClass = r.type === 'frontend' ? 'badge-frontend' : (r.type === 'backend' ? 'badge-backend' : 'badge-custom');
+        return \`
+          <tr>
+            <td><span class="badge badge-project">📦 \${escapeHtml(r.projectName)}</span></td>
+            <td style="font-weight: 600; color: #f1f5f9;">\${escapeHtml(r.serviceName)}</td>
+            <td>
+              <a href="http://\${encodeURIComponent(r.domain)}" target="_blank" class="domain-link">
+                🌐 \${escapeHtml(r.domain)} <span style="font-size: 0.8em;">↗</span>
+              </a>
+            </td>
+            <td><span class="port-tag">:\${r.targetPort}</span></td>
+            <td><span class="badge \${typeClass}">\${escapeHtml((r.type || 'custom').toUpperCase())}</span></td>
+            <td><span class="badge badge-status-live"><span class="live-dot"></span> LIVE</span></td>
+            <td>
+              <div class="action-group">
+                <button class="btn-action btn-logs" onclick="openLogModal('\${escapeHtml(r.domain)}', '\${escapeHtml(r.serviceName)}')">
+                  📜 Logs
+                </button>
+                <button class="btn-action btn-delete" onclick="deleteRoute('\${escapeHtml(r.domain)}', '\${escapeHtml(r.projectName)}')">
+                  🗑️ Remove
+                </button>
               </div>
-              <div>${domainLinks}</div>
-            </div>
-            <div>${selectButton}</div>
-          </div>
-        `;
-      })
-      .join('');
+            </td>
+          </tr>
+        \`;
+      }).join('');
+    }
 
-    return `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8">
-          <title>Hostmagic Gateway</title>
-        </head>
-        <body style="font-family: system-ui, -apple-system, sans-serif; background: #0b0f19; color: #f8fafc; margin: 0; padding: 40px;">
-          <div style="max-width: 800px; margin: 0 auto;">
-            <div style="text-align: center; margin-bottom: 32px;">
-              <h1 style="color: #c084fc; margin-bottom: 8px;">🧙‍♂️ Hostmagic Gateway</h1>
-              <p style="color: #94a3b8; font-size: 1.05rem;">
-                Multiple fullstack projects are running concurrently without port collisions.
-              </p>
-            </div>
-            <div>${projectCards || '<p style="color: #64748b; text-align: center;">No projects currently registered.</p>'}</div>
-            <div style="margin-top: 32px; text-align: center; color: #64748b; font-size: 0.85rem;">
-              Listening on port 80 &bull; Hostmagic Local Reverse Proxy
-            </div>
-          </div>
-        </body>
-      </html>
-    `;
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function filterTable() {
+      const q = document.getElementById('searchInput').value.toLowerCase().trim();
+      if (!q) {
+        renderTable(allRoutes);
+        return;
+      }
+      const filtered = allRoutes.filter(r =>
+        r.domain.toLowerCase().includes(q) ||
+        r.projectName.toLowerCase().includes(q) ||
+        r.serviceName.toLowerCase().includes(q) ||
+        String(r.targetPort).includes(q)
+      );
+      renderTable(filtered);
+    }
+
+    async function loadRoutes(showNotice) {
+      try {
+        const res = await fetch('/__hostmagic/api/status');
+        if (res.ok) {
+          const data = await res.json();
+          allRoutes = data.routes || [];
+          document.getElementById('metricDomains').textContent = allRoutes.length;
+          document.getElementById('metricProjects').textContent = (data.projects || []).length;
+          filterTable();
+          if (showNotice) showToast('Routes updated');
+        }
+      } catch (err) {
+        console.error('Failed to fetch routes', err);
+      }
+    }
+
+    // Modal Logs
+    const logModal = document.getElementById('logModal');
+    logModal.addEventListener('close', () => {
+      if (logInterval) {
+        clearInterval(logInterval);
+        logInterval = null;
+      }
+      activeLogTarget = null;
+    });
+
+    function openLogModal(domain, serviceName) {
+      activeLogTarget = domain;
+      document.getElementById('logModalTarget').textContent = domain + (serviceName ? ' (' + serviceName + ')' : '');
+      document.getElementById('terminalOutput').innerHTML = '<div class="terminal-empty">Connecting to live log stream...</div>';
+      logModal.showModal();
+      fetchLogs();
+      logInterval = setInterval(fetchLogs, 1200);
+    }
+
+    function closeLogModal() {
+      logModal.close();
+    }
+
+    function clearTerminalView() {
+      document.getElementById('terminalOutput').innerHTML = '<div class="terminal-empty">Log view cleared. Waiting for new output...</div>';
+    }
+
+    async function fetchLogs() {
+      if (!activeLogTarget) return;
+      try {
+        const res = await fetch('/__hostmagic/api/logs?target=' + encodeURIComponent(activeLogTarget));
+        if (res.ok) {
+          const data = await res.json();
+          const terminal = document.getElementById('terminalOutput');
+          if (data.logs && data.logs.length > 0) {
+            const shouldScroll = document.getElementById('autoScrollToggle').checked;
+            terminal.textContent = data.logs.map(cleanAnsi).join('\\n');
+            if (shouldScroll) {
+              terminal.scrollTop = terminal.scrollHeight;
+            }
+          } else {
+            terminal.innerHTML = '<div class="terminal-empty">No logs recorded yet for ' + escapeHtml(activeLogTarget) + '</div>';
+          }
+        }
+      } catch (err) {
+        // Ignored
+      }
+    }
+
+    // Modal Add
+    const addModal = document.getElementById('addModal');
+    function openAddModal() {
+      addModal.showModal();
+    }
+
+    function closeAddModal() {
+      addModal.close();
+    }
+
+    async function submitNewRoute() {
+      const project = document.getElementById('addProject').value.trim() || 'custom';
+      const service = document.getElementById('addService').value.trim() || 'service';
+      const domain = document.getElementById('addDomain').value.trim();
+      const port = parseInt(document.getElementById('addPort').value.trim(), 10);
+      const type = document.getElementById('addType').value;
+
+      if (!domain || isNaN(port) || port <= 0) {
+        alert('Please enter a valid domain and internal port.');
+        return;
+      }
+
+      try {
+        const res = await fetch('/__hostmagic/api/routes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectName: project,
+            serviceName: service,
+            domain: domain,
+            targetPort: port,
+            type: type
+          })
+        });
+
+        if (res.ok) {
+          closeAddModal();
+          showToast('Domain ' + domain + ' successfully registered!');
+          document.getElementById('addDomain').value = '';
+          document.getElementById('addPort').value = '';
+          await loadRoutes();
+        } else {
+          alert('Failed to register domain. Check server logs.');
+        }
+      } catch (err) {
+        alert('Error connecting to Hostmagic gateway.');
+      }
+    }
+
+    async function deleteRoute(domain, projectName) {
+      if (!confirm('Are you sure you want to remove domain ' + domain + ' from Hostmagic reverse proxy?')) {
+        return;
+      }
+
+      try {
+        const res = await fetch('/__hostmagic/api/routes', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain, projectName })
+        });
+
+        if (res.ok) {
+          showToast('Domain ' + domain + ' removed');
+          await loadRoutes();
+        } else {
+          alert('Failed to delete route.');
+        }
+      } catch (err) {
+        alert('Error communicating with Hostmagic gateway.');
+      }
+    }
+
+    // Initial table render
+    renderTable(allRoutes);
+  </script>
+</body>
+</html>`;
   }
 
   private renderNotFoundHtml(rawHost: string): string {

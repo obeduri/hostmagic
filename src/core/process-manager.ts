@@ -3,6 +3,7 @@ import readline from 'node:readline';
 import { execa, type ResultPromise } from 'execa';
 import pc from 'picocolors';
 import { terminateProcess } from './port-killer.js';
+import { ReverseProxyServer } from './proxy.js';
 import type { ServiceRuntimeInfo } from '../types.js';
 
 interface RunningProcess {
@@ -15,9 +16,37 @@ export class ProcessManager {
   private processes: RunningProcess[] = [];
   private isShuttingDown = false;
   private stopHooks: Array<() => Promise<void> | void> = [];
+  private gatewayPort?: number;
+  private queuedGatewayLogs: Array<{ target: string; line: string }> = [];
+  private gatewayFlushTimer?: NodeJS.Timeout;
 
   constructor() {
     this.setupSignalHandlers();
+  }
+
+  public setGatewayPort(port: number): void {
+    this.gatewayPort = port;
+    if (!this.gatewayFlushTimer) {
+      this.gatewayFlushTimer = setInterval(() => {
+        this.flushGatewayLogs();
+      }, 600);
+      this.gatewayFlushTimer.unref();
+    }
+  }
+
+  private flushGatewayLogs(): void {
+    if (!this.gatewayPort || this.queuedGatewayLogs.length === 0) return;
+    const batch = this.queuedGatewayLogs.splice(0, 100);
+    const byTarget = new Map<string, string[]>();
+    for (const item of batch) {
+      const list = byTarget.get(item.target) || [];
+      list.push(item.line);
+      byTarget.set(item.target, list);
+    }
+
+    for (const [target, lines] of byTarget.entries()) {
+      ReverseProxyServer.pushLogsToGateway(this.gatewayPort, target, lines).catch(() => {});
+    }
   }
 
   public onStop(hook: () => Promise<void> | void): void {
@@ -77,8 +106,26 @@ export class ProcessManager {
     return pc.yellow(pc.bold(`[${name.toUpperCase().slice(0, 5)}]`));
   }
 
-  private attachPrefixedLogger(stream: NodeJS.ReadableStream, prefix: string): void {
+  private attachPrefixedLogger(
+    stream: NodeJS.ReadableStream,
+    prefix: string,
+    serviceName?: string,
+    domain?: string
+  ): void {
     let buffer = '';
+
+    const handleLine = (rawLine: string) => {
+      const line = rawLine.replace(/[\r\n]+$/, '');
+      if (line.trim().length > 0 || line.length > 0) {
+        process.stdout.write(`${prefix} ${line}\n`);
+        if (serviceName) ReverseProxyServer.appendLog(serviceName, line);
+        if (domain) ReverseProxyServer.appendLog(domain, line);
+        if (this.gatewayPort) {
+          if (serviceName) this.queuedGatewayLogs.push({ target: serviceName, line });
+          if (domain) this.queuedGatewayLogs.push({ target: domain, line });
+        }
+      }
+    };
 
     stream.on('data', (chunk: Buffer | string) => {
       buffer += chunk.toString();
@@ -86,15 +133,13 @@ export class ProcessManager {
       buffer = lines.pop() ?? '';
 
       for (const line of lines) {
-        if (line.trim().length > 0 || line.length > 0) {
-          process.stdout.write(`${prefix} ${line}\n`);
-        }
+        handleLine(line);
       }
     });
 
     stream.on('end', () => {
       if (buffer.length > 0) {
-        process.stdout.write(`${prefix} ${buffer}\n`);
+        handleLine(buffer);
         buffer = '';
       }
     });
@@ -135,10 +180,20 @@ export class ProcessManager {
     this.processes.push(running);
 
     if (subprocess.stdout) {
-      this.attachPrefixedLogger(subprocess.stdout, prefix);
+      this.attachPrefixedLogger(
+        subprocess.stdout,
+        prefix,
+        info.service.name,
+        info.service.domain
+      );
     }
     if (subprocess.stderr) {
-      this.attachPrefixedLogger(subprocess.stderr, prefix);
+      this.attachPrefixedLogger(
+        subprocess.stderr,
+        prefix,
+        info.service.name,
+        info.service.domain
+      );
     }
 
     subprocess.catch((err) => {
@@ -151,6 +206,12 @@ export class ProcessManager {
   }
 
   public async stopAll(): Promise<void> {
+    if (this.gatewayFlushTimer) {
+      clearInterval(this.gatewayFlushTimer);
+      this.gatewayFlushTimer = undefined;
+      this.flushGatewayLogs();
+    }
+
     const killPromises = this.processes.map(async (proc) => {
       if (proc.pid) {
         try {
