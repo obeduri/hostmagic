@@ -48,14 +48,15 @@
    - [Step 7: Stopping Services (`ESC` or `Ctrl+C`)](#step-7-stopping-services-esc-or-ctrlc)
    - [Step 8: Cleaning Up Hosts Entries (`hm clean`)](#step-8-cleaning-up-hosts-entries-hm-clean)
    - [Step 9: Opening System Hosts File (`hm --hostfile`)](#step-9-opening-system-hosts-file-hm---hostfile)
-3. [⚡ Quick 2-Minute Demo Setup (Try Without Existing Project)](#-quick-2-minute-demo-setup)
-4. [⚙️ Configuration Schema (`.hostmagic.json`)](#️-configuration-schema-hostmagicjson)
-5. [🔐 Universal OAuth 2.0 Support (Any Provider)](#-universal-oauth-20-support-any-provider)
-6. [🧩 Injected Environment Variables](#-injected-environment-variables)
-7. [📋 Full CLI Command Reference](#-full-cli-command-reference)
-8. [❓ Troubleshooting & FAQs](#-troubleshooting--faqs)
-9. [🏗️ Architecture & Development](#️-architecture--development)
-10. [📄 License](#-license)
+3. [🎯 Supported Frameworks & Project Architectures](#-supported-frameworks--project-architectures)
+4. [⚡ Quick 2-Minute Demo Setup (Try Without Existing Project)](#-quick-2-minute-demo-setup)
+5. [⚙️ Configuration Schema (`.hostmagic.json`)](#️-configuration-schema-hostmagicjson)
+6. [🔐 Universal OAuth 2.0 Support (Any Provider)](#-universal-oauth-20-support-any-provider)
+7. [🧩 Injected Environment Variables](#-injected-environment-variables)
+8. [📋 Full CLI Command Reference](#-full-cli-command-reference)
+9. [❓ Troubleshooting & FAQs](#-troubleshooting--faqs)
+10. [🏗️ Architecture & Development](#️-architecture--development)
+11. [📄 License](#-license)
 
 ---
 
@@ -264,6 +265,90 @@ hm hostfile --editor code
 hm --hostfile -e cursor
 hm --hostfile -e nano
 ```
+
+---
+
+## 🎯 Supported Frameworks & Project Architectures
+
+Hostmagic works natively with **any web or API framework** across the JavaScript, TypeScript, Node.js, and Bun ecosystems, whether structured as a single standalone application or a multi-service monorepo.
+
+### 🎨 Frontend & Fullstack Frameworks
+
+| Framework | Target Modes | Detection & Command | Clean Domain |
+| :--- | :--- | :--- | :--- |
+| ⚛️ **Next.js** | App Router & Pages Router | Detected via `next` dependency; runs `next dev` | `http://<app>.test` |
+| ⚡ **Vite** | React, Vue, Svelte, Solid, Preact, Vanilla | Detected via `vite` dependency; runs `vite` | `http://<app>.test` |
+| 🚀 **Astro** | SSR & Static site generation | Detected via `astro` dependency; runs `astro dev` | `http://<app>.test` |
+| 💿 **Remix** | Fullstack web applications | Detected via `@remix-run/*`; runs `remix dev` | `http://<app>.test` |
+| 💚 **Nuxt.js** | Nuxt 3 & Nuxt 2 | Detected via `nuxt`; runs `nuxi dev` | `http://<app>.test` |
+| 🧡 **SvelteKit** | Svelte fullstack apps | Detected via `@sveltejs/kit` or `svelte`; runs `vite dev` | `http://<app>.test` |
+| 🔷 **Angular** | Angular CLI / SSR | Detected via `@angular/core`; runs `ng serve` | `http://<app>.test` |
+| 🟦 **SolidJS** | Solid & SolidStart | Detected via `solid-js`; runs `vinxi dev` or `vite` | `http://<app>.test` |
+| ⚡ **Qwik** | Qwik & Qwik City | Detected via `@builder.io/qwik`; runs `vite` | `http://<app>.test` |
+| 🧭 **TanStack** | TanStack Start & Router | Detected via `@tanstack/start` or `@tanstack/react-router` | `http://<app>.test` |
+| 📜 **Gatsby** | Static & Hydrated web apps | Detected via `gatsby`; runs `gatsby develop` | `http://<app>.test` |
+
+---
+
+### 🛠️ Backend, APIs & Microservices
+
+| Framework | Target Modes | Detection & Command | Clean Domain |
+| :--- | :--- | :--- | :--- |
+| 🚂 **Express.js** | REST APIs & Microservices | Detected via `express`; runs `dev` script or `node server.js` | `http://<app>.test` *(or `backend.<app>.test`)* |
+| ⚡ **Fastify** | High-performance JSON APIs | Detected via `fastify`; runs `fastify start` or dev script | `http://<app>.test` *(or `backend.<app>.test`)* |
+| 🦁 **NestJS** | Enterprise TypeScript backend | Detected via `@nestjs/core`; runs `nest start --watch` | `http://<app>.test` *(or `backend.<app>.test`)* |
+| 🔥 **Hono** | Lightweight Edge / Node / Bun API | Detected via `hono`; runs `bun run dev` or `tsx` | `http://<app>.test` *(or `backend.<app>.test`)* |
+| ☕ **Koa** | Middleware-based web service | Detected via `koa`; runs dev script or entry file | `http://<app>.test` *(or `backend.<app>.test`)* |
+| 🥑 **AdonisJS** | Fullstack Node.js framework | Detected via `@adonisjs/core`; runs `node ace serve --watch` | `http://<app>.test` *(or `backend.<app>.test`)* |
+| 🧩 **Hapi** | Configuration-centric API | Detected via `@hapi/hapi` or `hapi` | `http://<app>.test` *(or `backend.<app>.test`)* |
+| 📦 **Polka** | Minimalist micro-framework | Detected via `polka`; runs dev script or entry file | `http://<app>.test` *(or `backend.<app>.test`)* |
+| 🚀 **Strapi** | Headless CMS | Detected via `@strapi/strapi`; runs `strapi develop` | `http://<app>.test` *(or `backend.<app>.test`)* |
+| 🦚 **FeathersJS** | Real-time & REST API | Detected via `@feathersjs/feathers` | `http://<app>.test` *(or `backend.<app>.test`)* |
+| 🗄️ **ORM / DB APIs** | Prisma, Drizzle, TypeORM | Auto-detected and classified as backend service | `http://<app>.test` *(or `backend.<app>.test`)* |
+| 🟢 **Vanilla Node / Bun** | HTTP servers with `server.js` or `index.ts` | Auto-detects entry point file even without a `"dev"` script | `http://<app>.test` |
+
+---
+
+### 📂 Supported Repository Layouts
+
+Hostmagic automatically detects and adapts to your repository structure:
+
+#### 1. Standalone Single-Folder App (Root `package.json`)
+You have a single project folder (e.g. Next.js, Astro, Vite, or Express) where `package.json` is in the root directory:
+```text
+my-portfolio/
+├── package.json   (dependencies: { "astro": "^4.0.0" })
+├── astro.config.mjs
+└── src/
+```
+- **Action:** Run `hm init` inside `my-portfolio/`.
+- **Result:** Automatically configures `http://my-portfolio.test` pointing to your app with zero port numbers in the URL!
+
+#### 2. Traditional Multi-Service Monorepo (`frontend/` + `backend/`)
+You have distinct subfolders for frontend and backend:
+```text
+fullstack-shop/
+├── frontend/      (package.json -> Next.js)
+└── backend/       (package.json -> Express or NestJS)
+```
+- **Action:** Run `hm init` in `fullstack-shop/`.
+- **Result:** Automatically configures:
+  - Frontend: `http://fullstack-shop.test`
+  - Backend API: `http://backend.fullstack-shop.test`
+  - Injects `NEXT_PUBLIC_API_URL=http://backend.fullstack-shop.test` and `FRONTEND_URL=http://fullstack-shop.test` in-memory.
+
+#### 3. Monorepos & Workspaces (`apps/*`, `packages/*`)
+Turborepo, pnpm workspaces, npm/yarn workspaces, Lerna, and Nx:
+```text
+enterprise-mono/
+├── package.json   (workspaces: ["apps/*"])
+├── turbo.json
+└── apps/
+    ├── web/       (Next.js or Vite)
+    └── api/       (Fastify or NestJS)
+```
+- **Action:** Run `hm init` in `enterprise-mono/`.
+- **Result:** Detects individual workspace applications and assigns clean subdomains without creating redundant root services.
 
 ---
 
