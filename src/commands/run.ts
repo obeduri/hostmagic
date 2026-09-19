@@ -157,7 +157,9 @@ export async function runCommand(): Promise<void> {
     serviceName: s.service.name,
     type: s.service.type,
   }));
-  const frontendRuntime = runtimeServices.find((s) => s.service.type === 'frontend');
+  const frontendRuntime =
+    runtimeServices.find((s) => s.service.type === 'frontend') ||
+    (runtimeServices.length === 1 ? runtimeServices[0] : undefined);
 
   let proxyServer: ReverseProxyServer | undefined;
 

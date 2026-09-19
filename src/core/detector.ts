@@ -8,12 +8,20 @@ const CANDIDATE_DIRS = [
   'backend',
   'client',
   'server',
+  'web',
+  'api',
+  'app',
+  'ui',
   'apps/web',
   'apps/api',
   'apps/client',
   'apps/server',
   'packages/web',
   'packages/api',
+  'packages/client',
+  'packages/server',
+  'services/web',
+  'services/api',
 ];
 
 const FRONTEND_DEPS = [
@@ -22,10 +30,19 @@ const FRONTEND_DEPS = [
   'astro',
   'nuxt',
   'remix',
-  '@angular/core',
-  'vue',
-  'svelte',
+  '@remix-run/node',
+  '@remix-run/react',
   '@sveltejs/kit',
+  'svelte',
+  'vue',
+  '@angular/core',
+  'solid-js',
+  '@builder.io/qwik',
+  'react',
+  'preact',
+  'gatsby',
+  '@tanstack/react-router',
+  '@tanstack/start',
 ];
 
 const BACKEND_DEPS = [
@@ -35,9 +52,17 @@ const BACKEND_DEPS = [
   'koa',
   'hono',
   '@adonisjs/core',
+  'hapi',
+  '@hapi/hapi',
+  'polka',
+  'strapi',
+  '@strapi/strapi',
   'typeorm',
   'prisma',
   '@prisma/client',
+  'drizzle-orm',
+  'feathers',
+  '@feathersjs/feathers',
 ];
 
 /**
@@ -67,6 +92,29 @@ export async function detectPackageManager(dir: string, rootDir: string): Promis
   }
 
   return 'npm';
+}
+
+/**
+ * Checks whether a root directory is a monorepo workspace meta-root rather than a standalone app.
+ */
+export async function isLikelyMonorepoRoot(rootDir: string): Promise<boolean> {
+  const pkgPath = path.join(rootDir, 'package.json');
+  try {
+    const raw = await fs.readFile(pkgPath, 'utf-8');
+    const pkg = JSON.parse(raw);
+    if (pkg.workspaces) return true;
+  } catch {}
+
+  if (
+    existsSync(path.join(rootDir, 'pnpm-workspace.yaml')) ||
+    existsSync(path.join(rootDir, 'lerna.json')) ||
+    existsSync(path.join(rootDir, 'turbo.json')) ||
+    existsSync(path.join(rootDir, 'nx.json'))
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -103,15 +151,17 @@ export async function analyzeDirectory(
   let type: ServiceType = 'custom';
   let framework: string | undefined;
 
-  // Heuristic based on dependencies first, then folder naming
+  const isRoot = relativePath === '.' || relativePath === '' || relativePath === './';
   const lowerRel = relativePath.toLowerCase();
+
+  // Heuristic based on dependencies first, then folder naming
   if (detectedFrontend) {
     type = 'frontend';
     framework = detectedFrontend;
   } else if (detectedBackend) {
     type = 'backend';
     framework = detectedBackend;
-  } else if (lowerRel.includes('front') || lowerRel.includes('client') || lowerRel.includes('web')) {
+  } else if (lowerRel.includes('front') || lowerRel.includes('client') || lowerRel.includes('web') || lowerRel.includes('ui')) {
     type = 'frontend';
   } else if (lowerRel.includes('back') || lowerRel.includes('server') || lowerRel.includes('api')) {
     type = 'backend';
@@ -131,15 +181,33 @@ export async function analyzeDirectory(
   }
 
   let detectedCommand = `${pm} run ${scriptName}`;
-  if (pm === 'bun' && scriptName === 'dev') {
-    detectedCommand = 'bun dev';
-  } else if (pm === 'pnpm' && scriptName === 'dev') {
-    detectedCommand = 'pnpm dev';
+  if (scripts[scriptName]) {
+    if (pm === 'bun' && scriptName === 'dev') {
+      detectedCommand = 'bun dev';
+    } else if (pm === 'pnpm' && scriptName === 'dev') {
+      detectedCommand = 'pnpm dev';
+    }
+  } else {
+    // If no scripts found, fallback to entry file if present
+    const entry =
+      pkg.main ||
+      (existsSync(path.join(fullPath, 'server.js')) ? 'server.js' : undefined) ||
+      (existsSync(path.join(fullPath, 'index.js')) ? 'index.js' : undefined) ||
+      (existsSync(path.join(fullPath, 'server.ts')) ? 'server.ts' : undefined) ||
+      (existsSync(path.join(fullPath, 'src/index.ts')) ? 'src/index.ts' : undefined) ||
+      (existsSync(path.join(fullPath, 'src/index.js')) ? 'src/index.js' : undefined);
+
+    if (entry) {
+      detectedCommand = pm === 'bun' ? `bun ${entry}` : `node ${entry}`;
+    }
   }
 
   // Domain assignment according to PRD / config
   let suggestedDomain: string;
-  if (type === 'frontend') {
+  if (isRoot) {
+    // Standalone projects in the root directory always route to the primary project domain
+    suggestedDomain = `${projectName}.${tld}`;
+  } else if (type === 'frontend') {
     suggestedDomain = `${projectName}.${tld}`;
   } else if (type === 'backend') {
     suggestedDomain = `backend.${projectName}.${tld}`;
@@ -148,11 +216,20 @@ export async function analyzeDirectory(
     suggestedDomain = `${safeName}.${projectName}.${tld}`;
   }
 
-  const serviceName = path.basename(relativePath);
+  let serviceName: string;
+  if (isRoot) {
+    const cleanPkgName =
+      typeof pkg.name === 'string'
+        ? pkg.name.replace(/^@[^/]+\//, '').replace(/[^a-zA-Z0-9_-]/g, '-')
+        : '';
+    serviceName = cleanPkgName || projectName || (type === 'frontend' ? 'frontend' : type === 'backend' ? 'backend' : 'app');
+  } else {
+    serviceName = path.basename(relativePath);
+  }
 
   return {
     name: serviceName,
-    relativePath,
+    relativePath: isRoot ? '.' : relativePath,
     type,
     framework,
     detectedCommand,
@@ -161,7 +238,10 @@ export async function analyzeDirectory(
 }
 
 /**
- * Scans candidate subdirectories and returns detected services.
+ * Scans candidate subdirectories and root directory, returning detected services.
+ * Supports:
+ * 1. Traditional multi-service repos (frontend/ and backend/ subdirectories).
+ * 2. Standalone single-folder projects (Next.js, Astro, Vite, Express, Fastify, NestJS, etc. directly in root).
  */
 export async function detectServices(
   rootDir: string,
@@ -176,6 +256,34 @@ export async function detectServices(
       const service = await analyzeDirectory(fullPath, candidate, projectName, rootDir, tld);
       if (service) {
         detected.push(service);
+      }
+    }
+  }
+
+  // Check if root directory itself is a standalone service or complementary service
+  const rootPkgPath = path.join(rootDir, 'package.json');
+  if (existsSync(rootPkgPath)) {
+    if (detected.length === 0) {
+      // Standalone single-folder project (Next.js, Astro, Vite, Express, etc. in root)
+      const rootService = await analyzeDirectory(rootDir, '.', projectName, rootDir, tld);
+      if (rootService) {
+        detected.push(rootService);
+      }
+    } else {
+      // Subdirectories were detected. Check if root is an app frontend with a backend subdir, or vice versa
+      const isMonorepo = await isLikelyMonorepoRoot(rootDir);
+      if (!isMonorepo) {
+        const rootService = await analyzeDirectory(rootDir, '.', projectName, rootDir, tld);
+        if (rootService) {
+          const hasFrontendSubdir = detected.some((d) => d.type === 'frontend');
+          const hasBackendSubdir = detected.some((d) => d.type === 'backend');
+
+          if (rootService.type === 'frontend' && !hasFrontendSubdir) {
+            detected.unshift(rootService);
+          } else if (rootService.type === 'backend' && !hasBackendSubdir) {
+            detected.push(rootService);
+          }
+        }
       }
     }
   }

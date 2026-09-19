@@ -60,14 +60,14 @@ export async function initCommand(options: InitOptions): Promise<void> {
 
   // 2. Scan and Detect Services
   const spinner = p.spinner();
-  spinner.start('Scanning repository for frontend and backend services...');
+  spinner.start('Scanning repository for services (frontend, backend, or standalone)...');
 
   const detected = await detectServices(rootDir, projectName, tld);
   spinner.stop(`Found ${detected.length} service(s).`);
 
   if (detected.length === 0) {
     p.log.warn(
-      `No standard frontend or backend directories found (e.g. frontend/, backend/, apps/web/, apps/api/).`
+      `No services or package.json found in current directory or standard subdirectories (frontend/, backend/, apps/).`
     );
   }
 

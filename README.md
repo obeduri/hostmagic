@@ -27,7 +27,7 @@
 - 🍎 **Full macOS Support:** Native `/etc/hosts` synchronization with standard `sudo`, immediate mDNS / Bonjour cache clearing via `dscacheutil -flushcache` and `killall -HUP mDNSResponder`, process detection with `lsof`, and default TextEdit / GUI opener support.
 - 🐧 **First-Class Linux Support:** Complete compatibility across Ubuntu, Debian, Fedora, Arch, and more. Safely updates `/etc/hosts` using standard `sudo`, flushes `systemd-resolved` / `resolvectl` caches, detects listeners with `lsof`/`fuser`/`ss`, and supports non-root port 80 binding via `setcap`.
 - 🪟 **Automatic Windows UAC Elevation:** Running without administrative rights in Windows? Hostmagic triggers a native PowerShell UAC elevation prompt automatically without forcing you to restart your terminal as Administrator.
-- 🔍 **Heuristic Service Detection:** Scans subdirectories (`frontend/`, `backend/`, `client/`, `server/`, `apps/web/`, `apps/api/`) and inspects `package.json` to detect Next.js, Vite, Astro, NestJS, Express, etc.
+- 🔍 **Heuristic Multi & Single-Folder Detection:** Works seamlessly with multi-service monorepos (`frontend/` & `backend/`, `apps/`, `packages/`) **as well as standalone single-folder projects** (Next.js, Astro, Vite, Remix, Nuxt, SvelteKit, Express, Fastify, NestJS, etc. directly in the root folder).
 - 🎲 **Zero-Conflict Ephemeral Ports:** Allocates available random system ports internally via `get-port` so you can run multiple copies or projects simultaneously without port collision errors (`EADDRINUSE`).
 - 💉 **In-Memory Environment Injection:** Injects clean cross-service URLs (`NEXT_PUBLIC_API_URL`, `FRONTEND_URL`, `PORT`) directly into process memory without modifying your physical `.env` files.
 - 🌲 **Cascading Process Tree Termination:** Pressing `ESC` or `Ctrl+C` cleans up all child processes (Bun, Vite, Node) using `tree-kill`, leaving no zombie processes holding onto system ports.
@@ -110,8 +110,8 @@ hm init
 
 #### What the interactive wizard does:
 1. **Confirms project name:** Defaults to your folder name (e.g. `my-app`).
-2. **Scans & classifies services:** Detects `frontend/`, `backend/`, `apps/web/`, `apps/api/`, etc., and reads `package.json` to identify Next.js, Vite, Astro, NestJS, Express, etc.
-3. **Assigns clean domains:** Configures `http://my-app.test` and `http://backend.my-app.test`.
+2. **Scans & classifies services:** Supports both **multi-service repos** (`frontend/`, `backend/`, `apps/web/`, `apps/api/`) and **standalone single-folder apps** (Next.js, Astro, Vite, Remix, Nuxt, SvelteKit, Express, Fastify, NestJS, etc. directly in root).
+3. **Assigns clean domains:** Configures `http://<project>.test` (and `http://backend.<project>.test` for multi-service repos).
 4. **Saves configuration:** Writes `.hostmagic.json` in your project root.
 5. **Updates system `hosts` across platforms:**
    - 🪟 **Windows:** Triggers a native PowerShell UAC elevation prompt automatically (click **Yes**).
