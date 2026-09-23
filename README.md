@@ -19,9 +19,13 @@
 ## ⚡ Key Features
 
 - 🌐 **Clean `.test` Domains (No Ports!):** Say goodbye to confusing `localhost:3000` and ports at the end of URLs. Your apps run directly on intuitive addresses like `http://my-app.test` and `http://backend.my-app.test`.
-- 🎛️ **Central Settings & Multi-Project Dashboard (`http://hostmagic.settings`):** Built-in administrative control center running directly on port 80. View all configured projects—both running and stopped—with real-time status badges, interactive **▶ Start** and **⏹ Stop** controls, live log viewers (`📋 Copy Logs`), directory importers, and dynamic route managers.
+- 🎛️ **IBM Carbon Design System Dashboard (`http://hostmagic.settings`):** Built-in administrative control center crafted with the enterprise IBM Carbon Design System. Features flat dark mode (**Carbon Gray 100** `#161616`) by default, persistent Light/Dark theme switching, `IBM Plex` typography, and strict 0px border-radius engineering.
+- 📂 **Collapsible Project Accordions:** Every project is rendered as an interactive accordion with smooth chevrons and service counters. Accordions default to **collapsed** for a clean multi-project view, and include a global **Expand All / Collapse All** toggle.
+- 🎨 **Project Appearance Customizer:** Personalize each project card with a dedicated **React-Icon** (choose from 24 developer icons like `FiBox`, `FiGlobe`, `FiServer`, `FiDatabase`, `FiTerminal`, `FiCpu`, `FiCode`, `FiZap`) and custom **left-border accent color** (12 IBM Carbon swatches or custom hex picker). Settings sync instantly to `localStorage` and `~/.hostmagic/projects.json`.
+- ⚛️ **Zero-Emoji React-Icons SVG Engine:** Crisp, pixel-perfect vector SVGs (based on Feather / Carbon Icons) replacing all emojis across the entire interface.
 - 🚀 **Standalone Gateway (`hm start`):** Launch a lightweight, persistent Hostmagic Gateway server in the background to serve `hostmagic.settings` and dynamically route between projects as they are launched.
 - 🔄 **Hot-Refresh Settings & DNS (`hm --rs`):** Instantly flush DNS cache, synchronize system hosts, and push updated dashboard templates into the running gateway in memory—without stopping or restarting your background dev servers.
+- 📁 **Native OS Folder Linking:** Link unlinked project folders on disk directly from the web dashboard using native OS dialogs (Windows PowerShell WinForms, macOS AppleScript, and Linux Zenity).
 - 🔐 **Universal OAuth 2.0 Support (Any Provider):** Works seamlessly with **all providers following the OAuth 2.0 standard** (Google, GitHub, GitLab, Discord, Auth0, Okta, Supabase, Apple, Microsoft/Azure AD, Slack, Keycloak, etc.). An auxiliary listener on port 3000 catches incoming callbacks and immediately redirects with HTTP 302/307 to your `.test` domain, delivering PKCE, CSRF tokens, and session cookies with **zero application code changes**.
 - ⚡ **Built-in Port 80 Reverse Proxy:** Transparently routes incoming HTTP traffic and WebSockets (for HMR with Vite, Next.js, and Astro) from port 80 to your services' internal ephemeral ports.
 - 🛡️ **Non-Destructive & Namespaced `hosts` Management:** Safely inserts and updates system `hosts` entries inside isolated `# BEGIN hostmagic:<project>` blocks without corrupting existing entries.
@@ -184,24 +188,32 @@ Open your browser and navigate directly to:
 
 ### Step 5: Administrative Dashboard & Live Logs (`http://hostmagic.settings`)
 
-Hostmagic provides a dedicated local control plane running directly on port 80:
+Hostmagic provides a dedicated local control plane running directly on port 80, crafted following the enterprise **IBM Carbon Design System**:
 
-👉 **Open in browser:** [http://hostmagic.settings](http://hostmagic.settings)
+👉 **Open in browser:** [http://hostmagic.settings](http://hostmagic.settings) *(or `http://localhost/__hostmagic`)*
 
-#### What you can do from the dashboard:
-- 📦 **All Projects Overview:** View all registered projects on your machine—both 🟢 **RUNNING** and ⏸️ **STOPPED**—with their domain names, target ports, and service types.
-- ▶️ **Start Stopped Projects (Play Button):** Click **▶ Start** directly on any stopped project card to spawn its development servers in the background and automatically register its routes on Port 80.
-- ⏹️ **Stop Running Projects:** Click **⏹ Stop** to terminate background processes for that specific project safely.
-- 📁 **Import Existing Projects:** Click **📁 Add Project** to import any project folder containing `.hostmagic.json` into your central dashboard.
-- 📜 **Live Service Logs:** Click **📜 Logs** on any running service to stream real-time output from child processes.
-- 📋 **One-Click Copy Logs:** Click **`📋 Copy Logs`** in the terminal viewer to copy clean ANSI-stripped log history to your clipboard.
+#### Core Dashboard Capabilities:
+- 🖤 **IBM Carbon Dark Theme by Default:** Designed for developer ergonomics using Carbon Gray 100 (`#161616`) by default, with an instant Light / Dark mode toggle in the masthead header.
+- 📂 **Collapsible Project Accordions:** Clean, space-efficient overview. Project cards default to **collapsed**, displaying the project name, custom icon, status badge, service count, and action controls. Clicking anywhere on the project header smoothly expands or collapses the services table.
+- ↕️ **Global Expand / Collapse All:** Instantly expand or collapse all project accordions at once using the toolbar toggle.
+- 🎨 **Appearance Customizer (React-Icons & Border Colors):**
+  - Click **Style** (or click the project name/icon) on any project card to open the *Customize Project Appearance* modal.
+  - **24 React-Icons:** Select from curated developer vector icons (`FiBox`, `FiGlobe`, `FiServer`, `FiDatabase`, `FiCpu`, `FiTerminal`, `FiCode`, `FiZap`, `FiCloud`, `FiShield`, `FiSmartphone`, `FiLayers`, etc.) via a `<select>` dropdown or visual grid.
+  - **Left-Border Color Accent:** Choose from 12 IBM Carbon color swatches (`Blue 60`, `Cyan 50`, `Teal 40`, `Green 50`, `Magenta 50`, `Purple 60`, `Yellow 30`, `Orange 40`, etc.), native color picker, or arbitrary hex string.
+  - **Persistence:** Saved immediately in `localStorage` and automatically synchronized to the backend via `POST /__hostmagic/api/projects/customize` (`~/.hostmagic/projects.json`).
+- 📁 **Native OS Folder Linking:** If a project in your registry does not have a linked local path, click **Link Folder** to launch your operating system's native folder browser dialog (PowerShell WinForms on Windows, AppleScript on macOS, Zenity on Linux) and bind the path directly.
+- ▶️ **One-Click Project Runner:** Click **Start** to spawn background development servers for that project; click **Stop** to terminate its process tree safely.
+- 📜 **Live Service Logs:** Click **Logs** on any running service to open the real-time terminal modal with ANSI color parsing and auto-scrolling.
+- 📋 **One-Click Copy Logs:** Click **Copy Logs** to copy clean, ANSI-stripped log history directly to your clipboard.
 - 🔍 **Search & Filter:** Instantly filter projects, services, ports, and domains in real time.
-- ➕ **Dynamic Route Management:** Register standalone custom domains and target ports without modifying files.
+- ➕ **Dynamic Route Management:** Register standalone custom domains and target ports without modifying configuration files.
 - 🔌 **REST API Endpoints:**
   - `GET /__hostmagic/api/projects` — Returns all known registered projects, services, and live statuses.
   - `POST /__hostmagic/api/projects/start` — Starts a project by name or directory path: `{"name": "my-app"}`.
   - `POST /__hostmagic/api/projects/stop` — Stops a running project process tree: `{"name": "my-app"}`.
   - `POST /__hostmagic/api/projects/add` — Registers a project folder path: `{"path": "C:\\path\\to\\project"}`.
+  - `POST /__hostmagic/api/projects/customize` — Updates project icon and left-border color: `{"name": "my-app", "icon": "globe", "color": "#0f62fe"}`.
+  - `POST /__hostmagic/api/projects/browse` — Triggers native OS folder dialog to link a project path: `{"name": "my-app"}`.
   - `DELETE /__hostmagic/api/projects` — Unregisters a project from the global dashboard: `{"name": "my-app"}`.
   - `GET /__hostmagic/api/logs?target=<domain>` — Retrieves buffered log history.
   - `POST /__hostmagic/api/refresh-settings` — Hot-pushes updated dashboard templates into memory.
@@ -558,7 +570,7 @@ You can use either `hostmagic` or the shorthand **`hm`** alias interchangeably:
 | `hm clean` | `hostmagic clean` | Remove Hostmagic domain entries from system `hosts` for current project. |
 | | `-a, --all` | Remove Hostmagic entries across **all** projects. |
 | | `-y, --yes` | Skip interactive confirmation warning prompt. |
-| `hm --version` | `hm -V` | Display currently installed version of Hostmagic (e.g. `1.0.9`). |
+| `hm --version` | `hm -V` | Display currently installed version of Hostmagic (e.g. `1.1.1`). |
 | `hm --help` | `hm -h` | Display CLI help menu and list of available options. |
 
 ---

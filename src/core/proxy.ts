@@ -405,7 +405,7 @@ export class ReverseProxyServer {
         res.end(
           JSON.stringify({
             hostmagic: true,
-            version: '1.0.9',
+            version: '1.1.1',
             projects: Array.from(this.projects.values()),
             routes: allRoutes,
           })
@@ -690,7 +690,7 @@ export class ReverseProxyServer {
         res.end(
           JSON.stringify({
             hostmagic: true,
-            version: '1.0.9',
+            version: '1.1.1',
             projects: Array.from(this.projects.values()),
           })
         );
