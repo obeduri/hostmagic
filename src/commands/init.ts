@@ -6,6 +6,7 @@ import pc from 'picocolors';
 import { detectServices } from '../core/detector.js';
 import { syncHostsBlock, isElevated } from '../core/hosts.js';
 import { allocateUniquePorts } from '../core/port.js';
+import { registerProjectInGlobalRegistry } from '../core/registry.js';
 import {
   detectPreferredPort,
   freePortIfOccupied,
@@ -157,6 +158,9 @@ export async function initCommand(options: InitOptions): Promise<void> {
 
   await fs.writeFile(configPath, JSON.stringify(config, null, 2), 'utf-8');
   p.log.success(`Configuration saved to ${pc.cyan('.hostmagic.json')}`);
+
+  // Register in central Hostmagic project registry
+  await registerProjectInGlobalRegistry(config, rootDir).catch(() => {});
 
   // 5. Update hosts file
   const domains = services.map((s) => s.domain);

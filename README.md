@@ -19,7 +19,8 @@
 ## ⚡ Key Features
 
 - 🌐 **Clean `.test` Domains (No Ports!):** Say goodbye to confusing `localhost:3000` and ports at the end of URLs. Your apps run directly on intuitive addresses like `http://my-app.test` and `http://backend.my-app.test`.
-- 🎛️ **Central Settings & Live Logs (`http://hostmagic.settings`):** Built-in administrative dashboard running directly on port 80. View all active routes, inspect real-time log output with one-click clipboard copying (`📋 Copy Logs`), and dynamically add or delete proxy routes in memory.
+- 🎛️ **Central Settings & Multi-Project Dashboard (`http://hostmagic.settings`):** Built-in administrative control center running directly on port 80. View all configured projects—both running and stopped—with real-time status badges, interactive **▶ Start** and **⏹ Stop** controls, live log viewers (`📋 Copy Logs`), directory importers, and dynamic route managers.
+- 🚀 **Standalone Gateway (`hm start`):** Launch a lightweight, persistent Hostmagic Gateway server in the background to serve `hostmagic.settings` and dynamically route between projects as they are launched.
 - 🔄 **Hot-Refresh Settings & DNS (`hm --rs`):** Instantly flush DNS cache, synchronize system hosts, and push updated dashboard templates into the running gateway in memory—without stopping or restarting your background dev servers.
 - 🔐 **Universal OAuth 2.0 Support (Any Provider):** Works seamlessly with **all providers following the OAuth 2.0 standard** (Google, GitHub, GitLab, Discord, Auth0, Okta, Supabase, Apple, Microsoft/Azure AD, Slack, Keycloak, etc.). An auxiliary listener on port 3000 catches incoming callbacks and immediately redirects with HTTP 302/307 to your `.test` domain, delivering PKCE, CSRF tokens, and session cookies with **zero application code changes**.
 - ⚡ **Built-in Port 80 Reverse Proxy:** Transparently routes incoming HTTP traffic and WebSockets (for HMR with Vite, Next.js, and Astro) from port 80 to your services' internal ephemeral ports.
@@ -188,16 +189,22 @@ Hostmagic provides a dedicated local control plane running directly on port 80:
 👉 **Open in browser:** [http://hostmagic.settings](http://hostmagic.settings)
 
 #### What you can do from the dashboard:
-- 📊 **Real-time Overview:** View all registered fullstack projects, clean domains, internal ephemeral ports, and live health status (🟢 Online).
-- 📜 **Live Service Logs:** Click **View Logs** on any service to open a real-time modal streaming stdout and stderr output directly from the child processes.
-- 📋 **One-Click Copy Logs:** Click the **`📋 Copy Logs`** button inside the log viewer to instantly copy the complete, ANSI-stripped log history to your clipboard—perfect for troubleshooting or sharing error stack traces with AI assistants.
-- ➕ **Dynamic In-Memory Route Management:** Add or remove proxy routes on the fly without modifying configuration files or restarting running services.
-- 🔌 **REST API Integration:** Programmatically query or manage the running gateway:
-  - `GET /__hostmagic/api/status` — Returns active routes, registered projects, and gateway health.
-  - `GET /__hostmagic/api/logs?target=<domain>` — Retrieves the buffered log history for a specific service or domain.
-  - `POST /__hostmagic/api/routes` — Dynamically binds a custom domain to a target port: `{"domain": "docs.my-app.test", "targetPort": 8080}`.
-  - `DELETE /__hostmagic/api/routes` — Unregisters a dynamic route: `{"domain": "docs.my-app.test"}`.
-  - `POST /__hostmagic/api/refresh-settings` — Hot-pushes updated dashboard templates and route definitions into memory.
+- 📦 **All Projects Overview:** View all registered projects on your machine—both 🟢 **RUNNING** and ⏸️ **STOPPED**—with their domain names, target ports, and service types.
+- ▶️ **Start Stopped Projects (Play Button):** Click **▶ Start** directly on any stopped project card to spawn its development servers in the background and automatically register its routes on Port 80.
+- ⏹️ **Stop Running Projects:** Click **⏹ Stop** to terminate background processes for that specific project safely.
+- 📁 **Import Existing Projects:** Click **📁 Add Project** to import any project folder containing `.hostmagic.json` into your central dashboard.
+- 📜 **Live Service Logs:** Click **📜 Logs** on any running service to stream real-time output from child processes.
+- 📋 **One-Click Copy Logs:** Click **`📋 Copy Logs`** in the terminal viewer to copy clean ANSI-stripped log history to your clipboard.
+- 🔍 **Search & Filter:** Instantly filter projects, services, ports, and domains in real time.
+- ➕ **Dynamic Route Management:** Register standalone custom domains and target ports without modifying files.
+- 🔌 **REST API Endpoints:**
+  - `GET /__hostmagic/api/projects` — Returns all known registered projects, services, and live statuses.
+  - `POST /__hostmagic/api/projects/start` — Starts a project by name or directory path: `{"name": "my-app"}`.
+  - `POST /__hostmagic/api/projects/stop` — Stops a running project process tree: `{"name": "my-app"}`.
+  - `POST /__hostmagic/api/projects/add` — Registers a project folder path: `{"path": "C:\\path\\to\\project"}`.
+  - `DELETE /__hostmagic/api/projects` — Unregisters a project from the global dashboard: `{"name": "my-app"}`.
+  - `GET /__hostmagic/api/logs?target=<domain>` — Retrieves buffered log history.
+  - `POST /__hostmagic/api/refresh-settings` — Hot-pushes updated dashboard templates into memory.
 
 ---
 
@@ -540,7 +547,11 @@ You can use either `hostmagic` or the shorthand **`hm`** alias interchangeably:
 | | `-y, --yes` | Accept all detected defaults without interactive prompts. |
 | | `-n, --name <name>` | Specify a custom project name for domain resolution. |
 | | `-t, --tld <tld>` | Specify a custom top-level domain / suffix (default: `"test"`). |
-| `hm dev` | `hm run`, `hm start` | Allocate dynamic ephemeral ports, start port 80 gateway, OAuth bridge, and stream prefixed logs. |
+| `hm start` | `hm server`, `hm gateway` | Start the standalone Hostmagic Gateway & Settings server for `hostmagic.settings`. |
+| | `-p, --port <port>` | Gateway listening port (default: `80`). |
+| | `--oauth-port <port>` | OAuth bridge listening port (default: `3000`). |
+| | `-o, --open` | Open `http://hostmagic.settings` in your default browser. |
+| `hm dev` | `hm run` | Allocate dynamic ephemeral ports, start port 80 gateway, OAuth bridge, and stream prefixed logs. |
 | `hm --rs` | `hm --refresh-settings`, `hm rs` | **Hot-refresh:** Flushes DNS cache, re-syncs system `hosts`, updates project routes, and pushes latest dashboard template into gateway memory without restarting dev processes. |
 | `hm --hostfile` | `hm -H`, `hm hostfile`, `hm hosts` | Open operating system's `hosts` file across Windows, macOS, and Linux in your default editor. |
 | | `-e, --editor <editor>` | Open `hosts` with a custom editor (e.g. `code`, `cursor`, `nano`, `notepad`). |

@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { initCommand } from './commands/init.js';
 import { runCommand } from './commands/run.js';
+import { startCommand } from './commands/start.js';
 import { cleanCommand } from './commands/clean.js';
 import { hostfileCommand } from './commands/hostfile.js';
 import { refreshSettingsCommand } from './commands/refresh-settings.js';
@@ -55,9 +56,25 @@ program
   });
 
 program
+  .command('start')
+  .alias('server')
+  .alias('gateway')
+  .description('Start the standalone Hostmagic Gateway & Settings server for hostmagic.settings')
+  .option('-p, --port <port>', 'Gateway listening port (default: 80)', '80')
+  .option('--oauth-port <port>', 'OAuth bridge listening port (default: 3000)', '3000')
+  .option('-o, --open', 'Open hostmagic.settings in your default browser')
+  .action(async (options) => {
+    try {
+      await startCommand(options);
+    } catch (err: any) {
+      console.error(err.message || err);
+      process.exit(1);
+    }
+  });
+
+program
   .command('run')
   .alias('dev')
-  .alias('start')
   .description('Allocate dynamic ephemeral ports and run all configured services concurrently')
   .action(async () => {
     try {

@@ -33,3 +33,32 @@ export interface ServiceRuntimeInfo {
   url: string;
   env: Record<string, string>;
 }
+
+export interface RegisteredProject {
+  name: string;
+  path: string;
+  tld?: string;
+  services: ServiceConfig[];
+  icon?: string;
+  color?: string;
+  lastRun?: number;
+  createdAt?: number;
+}
+
+export interface DashboardProjectInfo {
+  name: string;
+  path: string;
+  tld?: string;
+  icon?: string;
+  color?: string;
+  status: 'running' | 'stopped';
+  services: Array<ServiceConfig & { url: string; livePort?: number }>;
+  routes: Array<{
+    domain: string;
+    targetPort: number;
+    serviceName?: string;
+    type?: string;
+  }>;
+  startedByGateway?: boolean;
+}
+

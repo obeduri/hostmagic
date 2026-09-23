@@ -6,6 +6,7 @@ import { allocateUniquePorts } from '../core/port.js';
 import { ProcessManager } from '../core/process-manager.js';
 import { ReverseProxyServer } from '../core/proxy.js';
 import { ensureSystemHostsEntry } from '../core/hosts.js';
+import { registerProjectInGlobalRegistry } from '../core/registry.js';
 import {
   freePortIfOccupied,
   checkAndCleanNextLock,
@@ -39,6 +40,9 @@ export async function runCommand(): Promise<void> {
     console.error(pc.red('No services configured in .hostmagic.json.'));
     process.exit(1);
   }
+
+  // Register in central Hostmagic project registry
+  await registerProjectInGlobalRegistry(config, rootDir).catch(() => {});
 
   // Ensure hostmagic.settings is registered in system hosts file
   try {
