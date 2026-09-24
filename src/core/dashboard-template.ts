@@ -402,6 +402,64 @@ export function getDefaultDashboardTemplate(): string {
       color: var(--cds-interactive);
     }
 
+    /* Project Card Autostart Toggle Switch */
+    .project-autostart-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 8px;
+      height: 28px;
+      border: 1px solid var(--cds-border-subtle);
+      background: var(--cds-layer);
+      user-select: none;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--cds-text-secondary);
+      transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+    }
+
+    .project-autostart-toggle:hover {
+      background-color: var(--cds-layer-hover);
+      border-color: var(--cds-border-strong);
+      color: var(--cds-text-primary);
+    }
+
+    .project-autostart-toggle.active {
+      border-color: var(--cds-interactive);
+      background-color: rgba(15, 98, 254, 0.12);
+      color: var(--cds-interactive);
+    }
+
+    .project-autostart-toggle .toggle-track {
+      width: 24px;
+      height: 14px;
+      background-color: var(--cds-border-strong);
+      border-radius: 14px;
+      position: relative;
+      transition: background-color 0.15s cubic-bezier(0.2, 0, 0.38, 0.9);
+      display: inline-block;
+    }
+
+    .project-autostart-toggle .toggle-dot {
+      width: 10px;
+      height: 10px;
+      background-color: #ffffff;
+      border-radius: 50%;
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      transition: transform 0.15s cubic-bezier(0.2, 0, 0.38, 0.9);
+    }
+
+    .project-autostart-toggle.active .toggle-track {
+      background-color: var(--cds-button-primary);
+    }
+
+    .project-autostart-toggle.active .toggle-dot {
+      transform: translateX(10px);
+    }
+
     /* Main Content Layout */
     .main-container {
       max-width: 1600px;
@@ -1881,6 +1939,19 @@ export function getDefaultDashboardTemplate(): string {
           Select a Carbon swatch, enter a custom hex code, or click <em>Reset</em> to follow live/stopped status.
         </p>
       </div>
+
+      <!-- Autostart on Gateway Launch -->
+      <div class="form-group" style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--cds-border-subtle);">
+        <label style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;">
+          <div>
+            <div style="font-weight: 600; color: var(--cds-text-primary);">Auto-start on Gateway Launch</div>
+            <div style="font-size: 12px; color: var(--cds-text-secondary); font-weight: normal; margin-top: 2px;">
+              Automatically start this project whenever <code>hm start</code> is run.
+            </div>
+          </div>
+          <input type="checkbox" id="customizeAutostartCheckbox" style="width: 18px; height: 18px; accent-color: var(--cds-interactive); cursor: pointer;" />
+        </label>
+      </div>
     </div>
     <div class="dialog-footer">
       <button type="button" class="btn btn-danger-outline" id="customizeForgetBtn" onclick="forgetCurrentProject()" style="margin-right: auto;" title="Remove project from dashboard">
@@ -2326,6 +2397,9 @@ export function getDefaultDashboardTemplate(): string {
       if (colorInput) colorInput.value = currentSelectedColor;
       if (colorPicker) colorPicker.value = currentSelectedColor || '#0f62fe';
 
+      const autostartCheck = document.getElementById('customizeAutostartCheckbox');
+      if (autostartCheck) autostartCheck.checked = Boolean(p.autostart);
+
       updateCustomizePreview();
       const modal = document.getElementById('customizeModal');
       if (modal) modal.showModal();
@@ -2410,6 +2484,12 @@ export function getDefaultDashboardTemplate(): string {
       };
       saveProjectCustomizations(styles);
 
+      const autostartCheck = document.getElementById('customizeAutostartCheckbox');
+      const isAutostart = autostartCheck ? autostartCheck.checked : false;
+
+      const proj = allProjects.find(item => item.name.toLowerCase() === name.toLowerCase());
+      if (proj) proj.autostart = isAutostart;
+
       // Async persist to gateway backend
       fetch('/__hostmagic/api/projects/customize', {
         method: 'POST',
@@ -2417,13 +2497,49 @@ export function getDefaultDashboardTemplate(): string {
         body: JSON.stringify({
           name: name,
           icon: currentSelectedIcon,
-          color: currentSelectedColor
+          color: currentSelectedColor,
+          autostart: isAutostart
         })
       }).catch(() => {});
 
       closeCustomizeModal();
       filterDashboard();
-      showToast('Appearance updated for [' + name + ']');
+      showToast('Settings updated for [' + name + ']');
+    }
+
+    async function toggleProjectAutostart(name) {
+      const proj = allProjects.find(p => p.name.toLowerCase() === name.toLowerCase());
+      const newStatus = !Boolean(proj?.autostart);
+
+      if (proj) proj.autostart = newStatus;
+      const toggleEl = document.getElementById('autostart-toggle-' + name);
+      if (toggleEl) {
+        toggleEl.classList.toggle('active', newStatus);
+      }
+
+      try {
+        const res = await fetch('/__hostmagic/api/projects/autostart', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, autostart: newStatus })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          if (newStatus) {
+            sileo.success('Auto-start enabled for [' + name + ']');
+          } else {
+            sileo.info('Auto-start disabled for [' + name + ']');
+          }
+        } else {
+          if (proj) proj.autostart = !newStatus;
+          if (toggleEl) toggleEl.classList.toggle('active', !newStatus);
+          sileo.error('Failed to update autostart: ' + (data.error || 'Unknown error'));
+        }
+      } catch (err) {
+        if (proj) proj.autostart = !newStatus;
+        if (toggleEl) toggleEl.classList.toggle('active', !newStatus);
+        sileo.error('Error updating autostart: ' + err.message);
+      }
     }
 
     function cleanAnsi(str) {
@@ -2660,6 +2776,16 @@ export function getDefaultDashboardTemplate(): string {
                   }
                 </div>
                 <div class="project-actions" onclick="event.stopPropagation()">
+                  <div class="project-autostart-toggle\${p.autostart ? ' active' : ''}" 
+                       id="autostart-toggle-\${escapeHtml(p.name)}" 
+                       data-name="\${escapeHtml(p.name)}" 
+                       onclick="event.stopPropagation(); toggleProjectAutostart(this.dataset.name)" 
+                       title="Auto-start project whenever 'hm start' is run">
+                    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px;">⚡ Auto-start</span>
+                    <span class="toggle-track">
+                      <span class="toggle-dot"></span>
+                    </span>
+                  </div>
                   <button type="button" class="btn-action" title="Open project in IDE or Terminal" onclick="openProjectIdeModal('\${escapeHtml(p.name)}')">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
                     Open in...

@@ -60,7 +60,8 @@ function padBannerLine(content: string, width = 64): string {
 function printStartBanner(
   port: number,
   oauthPort?: number,
-  project?: ProjectRegistration
+  project?: ProjectRegistration,
+  autoStarted?: string[]
 ): void {
   const line = '─'.repeat(64);
   console.log(pc.magenta(`\n┌${line}┐`));
@@ -89,6 +90,11 @@ function printStartBanner(
       const routeEntry = `    ↳ ${pc.bold(route.serviceName || route.domain)}: ${pc.underline(pc.green(routeUrl))}`;
       console.log(padBannerLine(routeEntry));
     }
+  }
+
+  if (autoStarted && autoStarted.length > 0) {
+    console.log(pc.magenta(`├${line}┤`));
+    console.log(padBannerLine(`  ⚡ Auto-started Projects: ${pc.cyan(autoStarted.join(', '))}`));
   }
 
   console.log(pc.magenta(`├${line}┤`));
@@ -150,6 +156,26 @@ export async function startCommand(options?: StartCommandOptions): Promise<void>
     if (registeredProjectName) {
       console.log(pc.cyan(`  ✔ Synchronized active routes for [${registeredProjectName}].`));
     }
+
+    // Auto-start any stopped projects configured for autostart
+    try {
+      const projRes = await fetch(`http://127.0.0.1:${port}/__hostmagic/api/projects`);
+      if (projRes.ok) {
+        const { projects } = (await projRes.json()) as any;
+        const toStart = (projects || []).filter((p: any) => p.autostart && p.status !== 'running');
+        for (const p of toStart) {
+          const startRes = await fetch(`http://127.0.0.1:${port}/__hostmagic/api/projects/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: p.name, path: p.path }),
+          });
+          if (startRes.ok) {
+            console.log(pc.cyan(`  ⚡ Auto-started project [${p.name}].`));
+          }
+        }
+      }
+    } catch {}
+
     const settingsUrl = port === 80 ? 'http://hostmagic.settings' : `http://hostmagic.settings:${port}`;
     console.log(
       pc.bold(
@@ -219,8 +245,11 @@ export async function startCommand(options?: StartCommandOptions): Promise<void>
     process.exit(1);
   }
 
-  // 6. Print status banner
-  printStartBanner(port, oauthPort, initialProject);
+  // 6. Auto-start marked projects
+  const autoStarted = await proxyServer.autoStartProjects();
+
+  // 7. Print status banner
+  printStartBanner(port, oauthPort, initialProject, autoStarted);
 
   const settingsUrl = port === 80 ? 'http://hostmagic.settings' : `http://hostmagic.settings:${port}`;
   if (options?.open) {

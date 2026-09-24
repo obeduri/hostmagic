@@ -63,7 +63,42 @@ try {
   assert.strictEqual(postDisableData.success, true);
   assert.strictEqual(postDisableData.enabled, false);
 
-  console.log('✅ All Hostmagic OS Autostart tests passed successfully!');
+  // 3. Test Per-Project Autostart
+  console.log('Test 6: POST /__hostmagic/api/projects/autostart enables autostart for project');
+  const projAutostartRes = await fetch(`http://127.0.0.1:${gatewayPort}/__hostmagic/api/projects/autostart`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'obeduri', autostart: true }),
+  });
+  assert.strictEqual(projAutostartRes.status, 200);
+  const projAutostartData = (await projAutostartRes.json()) as any;
+  assert.strictEqual(projAutostartData.success, true);
+  assert.strictEqual(projAutostartData.autostart, true);
+
+  console.log('Test 7: Projects API reflects autostart flag');
+  const projListRes = await fetch(`http://127.0.0.1:${gatewayPort}/__hostmagic/api/projects`);
+  assert.strictEqual(projListRes.status, 200);
+  const projListData = (await projListRes.json()) as any;
+  const obedProj = projListData.projects.find((p: any) => p.name === 'obeduri');
+  assert.ok(obedProj);
+  assert.strictEqual(obedProj.autostart, true);
+
+  console.log('Test 8: POST /__hostmagic/api/projects/autostart disables autostart');
+  const disableProjRes = await fetch(`http://127.0.0.1:${gatewayPort}/__hostmagic/api/projects/autostart`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'obeduri', autostart: false }),
+  });
+  assert.strictEqual(disableProjRes.status, 200);
+  const disableProjData = (await disableProjRes.json()) as any;
+  assert.strictEqual(disableProjData.success, true);
+  assert.strictEqual(disableProjData.autostart, false);
+
+  console.log('Test 9: gateway.autoStartProjects() executes cleanly');
+  const autoStarted = await gateway.autoStartProjects();
+  assert.ok(Array.isArray(autoStarted));
+
+  console.log('✅ All Hostmagic OS Autostart & Project Autostart tests passed successfully!');
 } finally {
   await gateway.stop();
   await disableAutostart();

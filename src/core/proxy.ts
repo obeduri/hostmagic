@@ -11,6 +11,7 @@ import {
   unregisterProjectFromGlobalRegistry,
   loadRegistry,
   saveRegistry,
+  setProjectAutostart,
 } from './registry.js';
 import { pickFolderDialog } from './dialog.js';
 import { ProcessManager } from './process-manager.js';
@@ -809,15 +810,53 @@ export class ReverseProxyServer {
             if (project) {
               if (body.icon !== undefined) project.icon = body.icon || undefined;
               if (body.color !== undefined) project.color = body.color || undefined;
+              if (body.autostart !== undefined) project.autostart = Boolean(body.autostart);
               await saveRegistry(registry);
+
+              if (project.path && existsSync(project.path)) {
+                const configPath = path.join(project.path, '.hostmagic.json');
+                if (existsSync(configPath)) {
+                  try {
+                    const raw = await fs.readFile(configPath, 'utf-8');
+                    const conf = JSON.parse(raw);
+                    if (body.autostart !== undefined) conf.autostart = Boolean(body.autostart);
+                    await fs.writeFile(configPath, JSON.stringify(conf, null, 2), 'utf-8');
+                  } catch {}
+                }
+              }
             }
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, name: target, icon: body.icon, color: body.color }));
+            res.end(
+              JSON.stringify({
+                success: true,
+                name: target,
+                icon: body.icon,
+                color: body.color,
+                autostart: body.autostart,
+              })
+            );
             return;
           }
         } catch {}
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Project name is required' }));
+        return;
+      }
+
+      if (apiPath === 'projects/autostart' && req.method === 'POST') {
+        try {
+          const body = await this.readJsonBody(req);
+          const target = body?.name || body?.projectName;
+          if (target && body.autostart !== undefined) {
+            const autostart = Boolean(body.autostart);
+            await setProjectAutostart(String(target), autostart);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, name: target, autostart }));
+            return;
+          }
+        } catch {}
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Project name and autostart boolean are required' }));
         return;
       }
 
@@ -1220,6 +1259,7 @@ export class ReverseProxyServer {
         tld: p.tld || 'test',
         icon: p.icon,
         color: p.color,
+        autostart: Boolean(p.autostart),
         status: isRunning ? 'running' : 'stopped',
         services: servicesWithStatus,
         routes: activeProject
@@ -1253,6 +1293,7 @@ export class ReverseProxyServer {
           name: p.name,
           path: process.cwd(),
           tld: p.routes[0]?.domain.split('.').pop() || 'test',
+          autostart: false,
           status: 'running',
           services: servicesWithStatus,
           routes: p.routes,
@@ -1262,6 +1303,27 @@ export class ReverseProxyServer {
     }
 
     return result;
+  }
+
+  public async autoStartProjects(): Promise<string[]> {
+    const known = await getKnownProjects();
+    const toStart = known.filter((p) => p.autostart && p.path && existsSync(p.path));
+    const started: string[] = [];
+
+    for (const proj of toStart) {
+      const pKey = proj.name.toLowerCase();
+      if (this.projects.has(proj.name) || Array.from(this.projects.values()).some((ap) => ap.name.toLowerCase() === pKey)) {
+        continue;
+      }
+      try {
+        const res = await this.startProjectByNameOrPath(proj.name);
+        if (res.success) {
+          started.push(proj.name);
+        }
+      } catch {}
+    }
+
+    return started;
   }
 
   public async startProjectByNameOrPath(nameOrPath: string): Promise<{

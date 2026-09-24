@@ -61,13 +61,18 @@ export async function registerProjectInGlobalRegistry(
       path.resolve(p.path).toLowerCase() === normalizedPath.toLowerCase()
   );
 
+  const existing = existingIndex >= 0 ? registry.projects[existingIndex] : undefined;
+
   const entry: RegisteredProject = {
     name: config.name,
     path: normalizedPath,
     tld: config.tld || 'test',
     services: config.services || [],
+    icon: (config as any).icon || existing?.icon,
+    color: (config as any).color || existing?.color,
+    autostart: config.autostart !== undefined ? Boolean(config.autostart) : Boolean(existing?.autostart),
     lastRun: now,
-    createdAt: existingIndex >= 0 ? registry.projects[existingIndex].createdAt || now : now,
+    createdAt: existing?.createdAt || now,
   };
 
   if (existingIndex >= 0) {
@@ -78,6 +83,30 @@ export async function registerProjectInGlobalRegistry(
 
   await saveRegistry(registry);
   return entry;
+}
+
+export async function setProjectAutostart(projectName: string, autostart: boolean): Promise<boolean> {
+  const registry = await loadRegistry();
+  const proj = registry.projects.find(
+    (p) => p.name.toLowerCase() === projectName.toLowerCase()
+  );
+  if (proj) {
+    proj.autostart = autostart;
+    await saveRegistry(registry);
+    if (proj.path && existsSync(proj.path)) {
+      const configPath = path.join(proj.path, '.hostmagic.json');
+      if (existsSync(configPath)) {
+        try {
+          const raw = await fs.readFile(configPath, 'utf-8');
+          const conf: HostmagicConfig = JSON.parse(raw);
+          conf.autostart = autostart;
+          await fs.writeFile(configPath, JSON.stringify(conf, null, 2), 'utf-8');
+        } catch {}
+      }
+    }
+    return true;
+  }
+  return false;
 }
 
 export async function unregisterProjectFromGlobalRegistry(projectName: string): Promise<boolean> {
@@ -100,7 +129,7 @@ export async function getKnownProjects(): Promise<RegisteredProject[]> {
   // 1. Load from saved registry (source of truth)
   for (const p of registry.projects) {
     if (p && p.name) {
-      knownMap.set(p.name.toLowerCase(), { ...p });
+      knownMap.set(p.name.toLowerCase(), { ...p, autostart: Boolean(p.autostart) });
     }
   }
 
@@ -149,6 +178,7 @@ export async function getKnownProjects(): Promise<RegisteredProject[]> {
               path: matchedPath,
               tld: domainLines[0]?.split('.').pop() || 'test',
               services,
+              autostart: false,
               createdAt: Date.now(),
             });
           }
@@ -172,6 +202,9 @@ export async function getKnownProjects(): Promise<RegisteredProject[]> {
             p.name = conf.name;
             p.tld = conf.tld || p.tld;
             p.services = conf.services || p.services;
+            if (conf.autostart !== undefined) {
+              p.autostart = Boolean(conf.autostart);
+            }
           }
         } catch {}
       }

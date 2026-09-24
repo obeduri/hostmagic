@@ -15,6 +15,7 @@ export interface HostmagicConfig {
   $schema?: string;
   name: string;
   tld?: string;
+  autostart?: boolean;
   services: ServiceConfig[];
 }
 
@@ -41,6 +42,7 @@ export interface RegisteredProject {
   services: ServiceConfig[];
   icon?: string;
   color?: string;
+  autostart?: boolean;
   lastRun?: number;
   createdAt?: number;
 }
@@ -51,6 +53,7 @@ export interface DashboardProjectInfo {
   tld?: string;
   icon?: string;
   color?: string;
+  autostart?: boolean;
   status: 'running' | 'stopped';
   services: Array<ServiceConfig & { url: string; livePort?: number }>;
   routes: Array<{
