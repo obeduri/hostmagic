@@ -207,6 +207,8 @@ Hostmagic provides a dedicated local control plane running directly on port 80, 
 - 📋 **One-Click Copy Logs:** Click **Copy Logs** to copy clean, ANSI-stripped log history directly to your clipboard.
 - 🔍 **Search & Filter:** Instantly filter projects, services, ports, and domains in real time.
 - ➕ **Dynamic Route Management:** Register standalone custom domains and target ports without modifying configuration files.
+- 🚀 **OS Start on Boot Toggle:** Easily toggle whether Hostmagic Gateway launches automatically in the background on Operating System boot (Windows Registry/VBScript silent launcher, macOS LaunchAgents, Linux systemd/desktop autostart).
+- 💻 **One-Click Open in IDE & Terminal:** Launch any project in your favorite editor or terminal directly from the inactive route gateway page and the Settings Hub. Supports Antigravity, Claude Code, Codex, VS Code, Cursor, Windsurf, Zed, Sublime Text, Notepad++, Visual Studio, WebStorm, DataGrip, PyCharm, IntelliJ IDEA, Android Studio, PhpStorm, GoLand, CLion, Rider, RubyMine, Fleet, Void, Positron, Trae, Neovim, Helix, Emacs, Eclipse, Xcode, Terminal, and File Explorer with smart PATH and application binary discovery.
 - 🔌 **REST API Endpoints:**
   - `GET /__hostmagic/api/projects` — Returns all known registered projects, services, and live statuses.
   - `POST /__hostmagic/api/projects/start` — Starts a project by name or directory path: `{"name": "my-app"}`.
@@ -215,7 +217,11 @@ Hostmagic provides a dedicated local control plane running directly on port 80, 
   - `POST /__hostmagic/api/projects/customize` — Updates project icon and left-border color: `{"name": "my-app", "icon": "globe", "color": "#0f62fe"}`.
   - `POST /__hostmagic/api/projects/browse` — Triggers native OS folder dialog to link a project path: `{"name": "my-app"}`.
   - `DELETE /__hostmagic/api/projects` — Unregisters a project from the global dashboard: `{"name": "my-app"}`.
+  - `GET /__hostmagic/api/autostart` — Checks if Hostmagic is configured to start on OS boot.
+  - `POST /__hostmagic/api/autostart` — Enables or disables automatic OS startup: `{"enabled": true}`.
   - `GET /__hostmagic/api/logs?target=<domain>` — Retrieves buffered log history.
+  - `GET /__hostmagic/api/ides` — Returns the catalog of supported IDEs and terminal applications.
+  - `POST /__hostmagic/api/projects/open-ide` — Launches a project folder in the selected IDE or terminal: `{"name": "my-app", "ide": "vscode"}`.
   - `POST /__hostmagic/api/refresh-settings` — Hot-pushes updated dashboard templates into memory.
 
 ---

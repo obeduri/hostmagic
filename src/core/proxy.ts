@@ -17,10 +17,20 @@ import { ProcessManager } from './process-manager.js';
 import { allocateUniquePorts } from './port.js';
 import { freePortIfOccupied, checkAndCleanNextLock } from './port-killer.js';
 import { getDefaultDashboardTemplate } from './dashboard-template.js';
+import { detectServices } from './detector.js';
+import {
+  isAutostartEnabled,
+  enableAutostart,
+  disableAutostart,
+  getAutostartStatus,
+} from './autostart.js';
+import { SUPPORTED_IDES, launchIde, type IdeDefinition } from './ide-launcher.js';
+import { getLogoBuffer, getLogoDataUri, getPwaManifest, getPwaServiceWorker } from './pwa-assets.js';
 import type {
   HostmagicConfig,
   DashboardProjectInfo,
   ServiceRuntimeInfo,
+  ServiceConfig,
 } from '../types.js';
 
 export interface ProxyRoute {
@@ -36,6 +46,10 @@ export interface ProjectRegistration {
   frontendPort?: number;
 }
 
+export interface ReverseProxyServerOptions {
+  showProjectLogs?: boolean;
+}
+
 export class ReverseProxyServer {
   private server: http.Server;
   private oauthBridgeServer?: http.Server;
@@ -43,6 +57,7 @@ export class ReverseProxyServer {
   private routes: Map<string, number> = new Map();
   private projects: Map<string, ProjectRegistration> = new Map();
   private projectProcessManagers: Map<string, ProcessManager> = new Map();
+  private showProjectLogs = false;
   private activeLocalhostTarget?: string;
   private listeningPort = 80;
   private oauthStateCache: Map<
@@ -158,7 +173,11 @@ export class ReverseProxyServer {
     });
   }
 
-  constructor(initialProject?: ProjectRegistration) {
+  constructor(
+    initialProject?: ProjectRegistration,
+    options?: ReverseProxyServerOptions
+  ) {
+    this.showProjectLogs = Boolean(options?.showProjectLogs);
     this.proxy = httpProxy.createProxyServer({
       changeOrigin: true,
       xfwd: true,
@@ -273,9 +292,29 @@ export class ReverseProxyServer {
           proxyRes.headers['access-control-allow-origin'] = `http://${host}`;
         }
       }
+
+      // Guarantee instant, unbuffered HMR updates (Next.js Fast Refresh, Vite HMR, Turbopack, Astro, Remix SSE):
+      const reqUrl = req?.url || '';
+      const contentType = proxyRes.headers['content-type'] || '';
+      const isHmrStreamOrChunk =
+        reqUrl.includes('webpack-hmr') ||
+        reqUrl.includes('turbopack-hmr') ||
+        reqUrl.includes('hot-update') ||
+        reqUrl.includes('/@vite') ||
+        reqUrl.includes('/_next/static/webpack/') ||
+        contentType.includes('text/event-stream');
+
+      if (isHmrStreamOrChunk) {
+        // Disable intermediate caching so changed styles, components, and chunks are fetched fresh immediately
+        proxyRes.headers['cache-control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0';
+        proxyRes.headers['pragma'] = 'no-cache';
+        proxyRes.headers['expires'] = '0';
+        // Disable buffering for real-time Server-Sent Events (SSE) and fast chunk delivery
+        proxyRes.headers['x-accel-buffering'] = 'no';
+      }
     });
 
-    // Error handler for proxy errors (e.g. backend service still spinning up)
+    // Error handler for proxy errors (e.g. backend service still spinning up or WebSocket disconnect)
     this.proxy.on('error', (err: any, req: any, res: any) => {
       const host = (req?.headers?.host || '').split(':')[0].toLowerCase();
       const targetPort = this.routes.get(host);
@@ -293,6 +332,8 @@ export class ReverseProxyServer {
             </body>
           </html>
         `);
+      } else if (res && typeof res.destroy === 'function' && !res.destroyed) {
+        try { res.destroy(); } catch {}
       }
     });
 
@@ -346,6 +387,61 @@ export class ReverseProxyServer {
           }
         }
       }
+    }
+
+    const pathname = (url.split('?')[0] || '/').toLowerCase();
+
+    // PWA Manifest
+    if (
+      pathname === '/__hostmagic/manifest.json' ||
+      pathname === '/__hostmagic/manifest.webmanifest' ||
+      (isSettingsHost && (pathname === '/manifest.json' || pathname === '/manifest.webmanifest'))
+    ) {
+      res.writeHead(200, {
+        'Content-Type': 'application/manifest+json; charset=utf-8',
+        'Cache-Control': 'no-cache',
+      });
+      res.end(getPwaManifest(isSettingsHost, host));
+      return;
+    }
+
+    // PWA Service Worker
+    if (pathname === '/__hostmagic/sw.js' || (isSettingsHost && pathname === '/sw.js')) {
+      res.writeHead(200, {
+        'Content-Type': 'application/javascript; charset=utf-8',
+        'Service-Worker-Allowed': '/',
+        'Cache-Control': 'no-cache',
+      });
+      res.end(getPwaServiceWorker());
+      return;
+    }
+
+    // PWA Logo, Favicon & App Icons (magichost.webp)
+    if (
+      pathname === '/__hostmagic/magichost.webp' ||
+      pathname === '/__hostmagic/logo.webp' ||
+      pathname === '/__hostmagic/favicon.ico' ||
+      pathname === '/__hostmagic/favicon.png' ||
+      pathname === '/magichost.webp' ||
+      (isSettingsHost && (
+        pathname === '/favicon.ico' ||
+        pathname === '/favicon.png' ||
+        pathname === '/apple-touch-icon.png' ||
+        pathname === '/apple-touch-icon-precomposed.png' ||
+        pathname === '/logo.webp'
+      )) ||
+      (pathname === '/favicon.ico' && !this.routes.has(host))
+    ) {
+      const logoBuffer = getLogoBuffer();
+      const isIco = pathname.endsWith('.ico');
+      res.writeHead(200, {
+        'Content-Type': isIco ? 'image/x-icon' : 'image/webp',
+        'Cache-Control': 'public, max-age=86400',
+        'Access-Control-Allow-Origin': '*',
+        'Content-Length': logoBuffer.length,
+      });
+      res.end(logoBuffer);
+      return;
     }
 
     // 1. Hostmagic Settings & Hub Dashboard
@@ -548,6 +644,35 @@ export class ReverseProxyServer {
         }
       }
 
+      if ((apiPath === 'projects/restart' || apiPath === 'projects/restart-all') && req.method === 'POST') {
+        try {
+          const body = await this.readJsonBody(req);
+          const target = body?.name || body?.path || body?.projectName;
+          if (target) {
+            const result = await this.startProjectByNameOrPath(target);
+            if (result.success) {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(result));
+            } else {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: result.error || 'Failed to restart project' }));
+            }
+          } else {
+            const running = Array.from(this.projectProcessManagers.keys());
+            for (const name of running) {
+              await this.startProjectByNameOrPath(name);
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, restarted: running }));
+          }
+          return;
+        } catch (err: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message || 'Internal server error' }));
+          return;
+        }
+      }
+
       if (apiPath === 'projects/stop' && req.method === 'POST') {
         try {
           const body = await this.readJsonBody(req);
@@ -626,6 +751,35 @@ export class ReverseProxyServer {
         }
       }
 
+      if (apiPath === 'projects/init-folder' && req.method === 'POST') {
+        try {
+          const body = await this.readJsonBody(req);
+          let targetPath = body?.path ? String(body.path).trim() : undefined;
+          if (!targetPath) {
+            const picked = await pickFolderDialog('Select Project Folder for Hostmagic Initialization');
+            if (!picked) {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: false, cancelled: true }));
+              return;
+            }
+            targetPath = picked;
+          }
+          const result = await this.initProjectAtFolder(targetPath, body?.domain);
+          if (result.success) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+          } else {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: result.error || 'Failed to initialize project' }));
+          }
+          return;
+        } catch (err: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message || 'Failed to initialize project folder' }));
+          return;
+        }
+      }
+
       if (apiPath === 'projects' && req.method === 'DELETE') {
         try {
           const body = await this.readJsonBody(req);
@@ -665,6 +819,79 @@ export class ReverseProxyServer {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Project name is required' }));
         return;
+      }
+
+      if (apiPath === 'autostart' && req.method === 'GET') {
+        const status = await getAutostartStatus();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, ...status }));
+        return;
+      }
+
+      if (apiPath === 'autostart' && req.method === 'POST') {
+        try {
+          const body = await this.readJsonBody(req);
+          const enable = Boolean(body?.enabled);
+          const result = enable ? await enableAutostart() : await disableAutostart();
+          const currentStatus = await isAutostartEnabled();
+          if (result.success) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, enabled: currentStatus }));
+          } else {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: result.error || 'Failed to update autostart setting' }));
+          }
+          return;
+        } catch (err: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message || 'Internal server error' }));
+          return;
+        }
+      }
+
+      if ((apiPath === 'ides' || apiPath === 'projects/ides') && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, ides: SUPPORTED_IDES }));
+        return;
+      }
+
+      if ((apiPath === 'projects/open-ide' || apiPath === 'open-ide') && req.method === 'POST') {
+        try {
+          const body = await this.readJsonBody(req);
+          const ide = body?.ide || body?.editor || 'vscode';
+          let targetPath = body?.path ? String(body.path).trim() : undefined;
+          const targetName = body?.name || body?.projectName;
+          const targetDomain = body?.domain;
+
+          if (!targetPath && (targetName || targetDomain)) {
+            const known = await getKnownProjects();
+            const found = known.find(p => {
+              if (targetName && p.name.toLowerCase() === String(targetName).toLowerCase()) return true;
+              if (targetDomain && p.services?.some(s => s.domain?.toLowerCase() === String(targetDomain).toLowerCase())) return true;
+              const baseName = targetDomain ? String(targetDomain).split('.')[0].toLowerCase() : '';
+              if (baseName && p.name.toLowerCase() === baseName) return true;
+              return false;
+            });
+            if (found?.path) {
+              targetPath = found.path;
+            }
+          }
+
+          if (!targetPath) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, needPath: true, error: 'Project folder is not linked yet.' }));
+            return;
+          }
+
+          const launchResult = await launchIde(ide, targetPath);
+          res.writeHead(launchResult.success ? 200 : 400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(launchResult));
+          return;
+        } catch (err: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: err.message || 'Failed to open project in IDE' }));
+          return;
+        }
       }
 
       if (apiPath === 'refresh-settings' && req.method === 'POST') {
@@ -818,22 +1045,31 @@ export class ReverseProxyServer {
         req.headers['x-forwarded-port'] = '3000';
       }
 
-      // Transparent HMR & Fast Refresh Support for Next.js, Vite, and Astro:
-      // When dev servers (Next.js 14.2+, Next.js 15, Vite, etc.) receive HMR requests
-      // (like /_next/webpack-hmr, /_next/hmr, or dev polling), they check the Origin header.
-      // If Origin is http://my-app.test while the internal server is on localhost:PORT,
-      // Next.js blocks the request with:
-      // "Blocked cross-origin request to Next.js dev resource /_next/hmr from my-app.test"
-      // By normalizing the Origin to match the internal target (or same-origin to host),
-      // dev servers recognize the request as same-origin, guaranteeing 100% reliable Fast Refresh!
+      // Transparent HMR & Fast Refresh Support for Next.js, Vite, Turbopack, Astro, Remix:
+      // When dev servers (Next.js 14/15, Vite, Webpack, etc.) receive HMR requests
+      // (like /_next/webpack-hmr, /_next/hmr, dev polling, or dynamic chunks), they check the Origin & Referer headers.
+      // If Origin/Referer is http://my-app.test while the internal server is on localhost:PORT,
+      // dev servers block the request with cross-origin errors or disconnect the HMR WebSocket/SSE stream.
+      // By normalizing the Origin and Referer to match the internal target (for dev resources or same-origin requests),
+      // dev servers recognize the request as same-origin, guaranteeing 100% reliable Fast Refresh & Hot Reloading!
       const isDevResource =
         url.startsWith('/_next/') ||
         url.startsWith('/@vite') ||
         url.startsWith('/__vite') ||
         url.startsWith('/_astro') ||
+        url.startsWith('/@fs') ||
+        url.startsWith('/@id') ||
+        url.startsWith('/__turbopack') ||
+        url.startsWith('/_remix') ||
+        url.startsWith('/_nuxt') ||
+        url.startsWith('/_app') ||
+        url.startsWith('/__webpack') ||
         url.includes('webpack-hmr') ||
+        url.includes('turbopack-hmr') ||
         url.includes('hot-update') ||
-        url.includes('hmr');
+        url.includes('hmr') ||
+        url.includes('sockjs-node') ||
+        url.includes('/ws');
 
       const rawOrigin = req.headers.origin;
       const isSameOriginToHost =
@@ -846,8 +1082,15 @@ export class ReverseProxyServer {
       if (isDevResource || isSameOriginToHost) {
         req.headers['x-forwarded-host'] = rawHost;
         req.headers['x-forwarded-proto'] = 'http';
+        req.headers['x-forwarded-for'] = req.socket.remoteAddress || '127.0.0.1';
         if (req.headers.origin) {
           req.headers.origin = `http://127.0.0.1:${targetPort}`;
+        }
+        if (req.headers.referer) {
+          req.headers.referer = req.headers.referer.replace(
+            /^https?:\/\/[^/]+/i,
+            `http://127.0.0.1:${targetPort}`
+          );
         }
       }
 
@@ -856,7 +1099,7 @@ export class ReverseProxyServer {
       });
     } else {
       res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(this.renderNotFoundHtml(rawHost));
+      res.end(await this.renderNotFoundHtml(rawHost));
     }
   };
 
@@ -879,13 +1122,23 @@ export class ReverseProxyServer {
       // Preserve original host in forwarded headers
       req.headers['x-forwarded-host'] = rawHost;
       req.headers['x-forwarded-proto'] = 'http';
+      req.headers['x-forwarded-for'] = req.socket.remoteAddress || '127.0.0.1';
 
-      // Normalize Origin for WebSocket HMR (Next.js Fast Refresh, Vite HMR, Astro HMR)
+      // Normalize Origin & Referer for WebSocket HMR (Next.js Fast Refresh, Vite HMR, Astro HMR, Remix)
       // When the browser connects from http://<app>.test, Next.js 14/15 and Vite WebSocket
       // servers check whether Origin matches the internal listening address.
       // Normalizing Origin ensures HMR WebSockets are never blocked by cross-origin checks!
       if (req.headers.origin) {
         req.headers.origin = `http://127.0.0.1:${targetPort}`;
+      }
+      if (req.headers['sec-websocket-origin']) {
+        req.headers['sec-websocket-origin'] = `http://127.0.0.1:${targetPort}`;
+      }
+      if (req.headers.referer) {
+        req.headers.referer = req.headers.referer.replace(
+          /^https?:\/\/[^/]+/i,
+          `http://127.0.0.1:${targetPort}`
+        );
       }
 
       this.proxy.ws(req, socket, head, {
@@ -907,6 +1160,11 @@ export class ReverseProxyServer {
     for (const route of project.routes) {
       this.registerRoute(route.domain, route.targetPort);
     }
+
+    const domainList = project.routes.map((r) => r.domain).join(', ');
+    console.log(
+      pc.cyan(`  ⚡ [GATEWAY] Project connected: ${pc.bold(project.name)}${domainList ? pc.dim(` (${domainList})`) : ''}`)
+    );
   }
 
   public unregisterProject(projectName: string): void {
@@ -921,6 +1179,8 @@ export class ReverseProxyServer {
     if (this.activeLocalhostTarget === projectName) {
       this.activeLocalhostTarget = undefined;
     }
+
+    console.log(pc.dim(`  🔌 [GATEWAY] Project disconnected: ${projectName}`));
   }
 
   public async getDashboardProjects(): Promise<DashboardProjectInfo[]> {
@@ -1120,6 +1380,8 @@ export class ReverseProxyServer {
         }
         env.NEXT_PUBLIC_APP_URL = cleanUrl;
         env.VITE_APP_URL = cleanUrl;
+        env.FAST_REFRESH = 'true';
+        env.FORCE_COLOR = '1';
         env.NEXTAUTH_URL = 'http://localhost:3000';
         env.AUTH_URL = 'http://localhost:3000';
         env.AUTH_TRUST_HOST = 'true';
@@ -1161,7 +1423,10 @@ export class ReverseProxyServer {
     await registerProjectInGlobalRegistry(config, projectDir).catch(() => {});
 
     // Create process manager and launch services
-    const manager = new ProcessManager();
+    const manager = new ProcessManager({
+      quiet: !this.showProjectLogs,
+      handleSignals: false,
+    });
     manager.setGatewayPort(this.listeningPort);
 
     for (const info of runtimeServices) {
@@ -1169,6 +1434,11 @@ export class ReverseProxyServer {
     }
 
     this.projectProcessManagers.set(pKey, manager);
+    console.log(
+      pc.green(
+        `  ⚡ [GATEWAY] Started project '${config.name}' (${proxyRoutes.map((r) => r.domain).join(', ')})`
+      )
+    );
     return { success: true, project: config.name };
   }
 
@@ -1182,10 +1452,120 @@ export class ReverseProxyServer {
     if (manager) {
       await manager.stopAll().catch(() => {});
       this.projectProcessManagers.delete(pKey);
+      console.log(pc.yellow(`  🛑 [GATEWAY] Stopped project '${name}'`));
     }
 
     this.unregisterProject(name);
     return { success: true, stopped: name };
+  }
+
+  public async initProjectAtFolder(
+    folderPath: string,
+    suggestedDomain?: string
+  ): Promise<{
+    success: boolean;
+    project?: string;
+    path?: string;
+    error?: string;
+  }> {
+    const resolvedPath = path.resolve(folderPath);
+    if (!existsSync(resolvedPath)) {
+      return { success: false, error: `Directory not found: ${resolvedPath}` };
+    }
+
+    const configPath = path.join(resolvedPath, '.hostmagic.json');
+    if (existsSync(configPath)) {
+      // Already has .hostmagic.json, load it, register it, sync hosts and start!
+      try {
+        const raw = await fs.readFile(configPath, 'utf-8');
+        const config: HostmagicConfig = JSON.parse(raw);
+        await registerProjectInGlobalRegistry(config, resolvedPath);
+        if (config.services && config.services.length > 0) {
+          try {
+            await syncHostsBlock(
+              config.name,
+              config.services.map((s) => s.domain)
+            );
+          } catch {}
+        }
+        await this.startProjectByNameOrPath(config.name);
+        return { success: true, project: config.name, path: resolvedPath };
+      } catch (err: any) {
+        return { success: false, error: `Failed to load existing .hostmagic.json: ${err.message}` };
+      }
+    }
+
+    // Otherwise detect services and generate .hostmagic.json
+    try {
+      const cleanDomain = suggestedDomain ? suggestedDomain.split(':')[0].toLowerCase() : undefined;
+      const tld = cleanDomain?.split('.').pop() || 'test';
+      const defaultName = cleanDomain
+        ? cleanDomain.split('.')[0]
+        : path.basename(resolvedPath).toLowerCase().replace(/[^a-z0-9-]/g, '-');
+
+      const detected = await detectServices(resolvedPath, defaultName, tld);
+      const services: ServiceConfig[] = [];
+      const assignedPorts = new Set<number>();
+
+      if (detected.length === 0) {
+        const [assignedPort] = await allocateUniquePorts(1, Array.from(assignedPorts));
+        const domain = cleanDomain || `${defaultName}.${tld}`;
+        services.push({
+          name: 'web',
+          path: '.',
+          type: 'frontend',
+          domain,
+          command: 'npm run dev',
+          port: assignedPort,
+        });
+      } else {
+        for (let i = 0; i < detected.length; i++) {
+          const s = detected[i];
+          const serviceDir = path.join(resolvedPath, s.relativePath);
+          await checkAndCleanNextLock(serviceDir, true);
+
+          const [assignedPort] = await allocateUniquePorts(1, Array.from(assignedPorts));
+          assignedPorts.add(assignedPort);
+
+          // If suggestedDomain is provided and this is frontend (or first service), use suggestedDomain
+          const serviceDomain =
+            cleanDomain && (s.type === 'frontend' || i === 0)
+              ? cleanDomain
+              : s.suggestedDomain;
+
+          services.push({
+            name: s.name,
+            path: s.relativePath,
+            type: s.type,
+            domain: serviceDomain,
+            command: s.detectedCommand,
+            port: assignedPort,
+          });
+        }
+      }
+
+      const config: HostmagicConfig = {
+        $schema: 'https://raw.githubusercontent.com/hostmagic/cli/main/schema.json',
+        name: defaultName,
+        tld,
+        services,
+      };
+
+      await fs.writeFile(configPath, JSON.stringify(config, null, 2), 'utf-8');
+      await registerProjectInGlobalRegistry(config, resolvedPath);
+
+      try {
+        await syncHostsBlock(
+          config.name,
+          config.services.map((s) => s.domain)
+        );
+      } catch {}
+
+      await this.startProjectByNameOrPath(config.name);
+      return { success: true, project: defaultName, path: resolvedPath };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to initialize project' };
+    }
   }
 
   public registerRoute(domain: string, targetPort: number): void {
@@ -1428,19 +1808,733 @@ export class ReverseProxyServer {
     return getDefaultDashboardTemplate();
   }
 
-  private renderNotFoundHtml(rawHost: string): string {
-    const configured = Array.from(this.routes.keys()).join(', ');
-    return `
-      <!DOCTYPE html>
-      <html>
-        <head><title>Hostmagic - Not Found</title></head>
-        <body style="font-family: system-ui, -apple-system, sans-serif; padding: 40px; background: #0b0f19; color: #f8fafc; text-align: center;">
-          <h1 style="color: #f43f5e;">❌ Host Not Found</h1>
-          <p style="font-size: 1.1rem;">No service is configured for <strong>${rawHost}</strong>.</p>
-          <p style="color: #94a3b8;">Active routes: <code>${configured || 'none'}</code></p>
-        </body>
-      </html>
-    `;
+  public async renderNotFoundHtml(rawHost: string): Promise<string> {
+    const cleanHost = (rawHost || '').split(':')[0].toLowerCase();
+
+    let matchedProject: { name: string; path?: string; tld?: string } | undefined;
+    try {
+      const knownProjects = await getKnownProjects();
+      matchedProject = knownProjects.find((p) => {
+        if (p.services && p.services.some((s) => s.domain?.toLowerCase() === cleanHost)) {
+          return true;
+        }
+        const baseName = cleanHost.split('.')[0];
+        if (p.name && p.name.toLowerCase() === baseName) {
+          return true;
+        }
+        const tld = p.tld || 'test';
+        if (cleanHost === `${p.name?.toLowerCase()}.${tld}`) {
+          return true;
+        }
+        return false;
+      });
+    } catch {}
+
+    const safeHost = cleanHost
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+
+    const safeProjectName = matchedProject?.name
+      ? matchedProject.name
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;')
+      : '';
+
+    const primaryIdeIds = ['antigravity', 'claude', 'codex', 'vscode', 'cursor', 'terminal'];
+    const primaryIdes = SUPPORTED_IDES.filter((i) => primaryIdeIds.includes(i.id));
+    const moreIdes = SUPPORTED_IDES.filter((i) => !primaryIdeIds.includes(i.id));
+
+    const primaryButtonsHtml = primaryIdes
+      .map(
+        (ide) => `
+        <button type="button" class="btn-ide primary-ide ide-item" data-search="${ide.name.toLowerCase()}" onclick="openInIde('${ide.id}', '${safeProjectName}', '${safeHost}')" title="${ide.name}">
+          <span>${ide.name}</span>
+        </button>`
+      )
+      .join('');
+
+    const moreButtonsHtml = moreIdes
+      .map(
+        (ide) => `
+        <button type="button" class="btn-ide more-ide-item ide-item" data-search="${ide.name.toLowerCase()}" onclick="openInIde('${ide.id}', '${safeProjectName}', '${safeHost}')" title="${ide.name}">
+          <span>${ide.name}</span>
+        </button>`
+      )
+      .join('');
+
+    return `<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hostmagic - ${matchedProject ? 'Route Inactive' : 'Host Not Found'}</title>
+  <link rel="manifest" href="/__hostmagic/manifest.json" />
+  <link rel="icon" type="image/webp" href="${getLogoDataUri()}" />
+  <link rel="apple-touch-icon" href="${getLogoDataUri()}" />
+  <meta name="theme-color" content="#121212" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Hostmagic" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #121212;
+      --card-bg: #1e1e1e;
+      --border: #333333;
+      --border-focus: #78a9ff;
+      --text-main: #f4f4f4;
+      --text-sub: #a8a8a8;
+      --text-dim: #6f6f6f;
+      --primary: #0f62fe;
+      --primary-hover: #0353e9;
+      --secondary: #2c2c2c;
+      --secondary-hover: #3d3d3d;
+      --amber: #f1c21b;
+      --amber-bg: rgba(241, 194, 27, 0.12);
+      --red: #fa4d56;
+      --red-bg: rgba(250, 77, 86, 0.12);
+      --green: #42be65;
+      --green-bg: rgba(66, 190, 101, 0.12);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--bg);
+      background-image: radial-gradient(circle at 50% 20%, #1a1a24 0%, var(--bg) 80%);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      max-width: 580px;
+      width: 100%;
+      padding: 36px 32px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+      text-align: left;
+    }
+    .masthead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      color: #78a9ff;
+      text-transform: uppercase;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+    }
+    .badge.inactive {
+      background: var(--amber-bg);
+      color: var(--amber);
+      border: 1px solid rgba(241, 194, 27, 0.3);
+    }
+    .badge.not-found {
+      background: var(--red-bg);
+      color: var(--red);
+      border: 1px solid rgba(250, 77, 86, 0.3);
+    }
+    .badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .host-header {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--text-main);
+      word-break: break-all;
+      margin-bottom: 12px;
+    }
+    .desc {
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--text-sub);
+      margin-bottom: 28px;
+    }
+    .desc strong {
+      color: #ffffff;
+    }
+    .project-pill {
+      font-family: 'IBM Plex Mono', monospace;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      padding: 2px 6px;
+      color: #a6c8ff;
+      font-size: 13px;
+    }
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      height: 44px;
+      padding: 0 20px;
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      width: 100%;
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #ffffff;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary-hover);
+    }
+    .btn-secondary {
+      background: var(--secondary);
+      color: var(--text-main);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: var(--secondary-hover);
+      border-color: #555555;
+    }
+    .btn-ghost {
+      background: transparent;
+      color: #78a9ff;
+      font-size: 13px;
+      height: 36px;
+      margin-top: 4px;
+    }
+    .btn-ghost:hover {
+      text-decoration: underline;
+      color: #a6c8ff;
+    }
+    .status-alert {
+      margin-top: 18px;
+      padding: 12px 14px;
+      font-size: 13px;
+      line-height: 1.4;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-left: 3px solid transparent;
+      background: #262626;
+    }
+    .status-alert.info {
+      border-color: #0f62fe;
+      color: #d0e2ff;
+      background: rgba(15, 98, 254, 0.1);
+    }
+    .status-alert.success {
+      border-color: var(--green);
+      color: #defbe6;
+      background: var(--green-bg);
+    }
+    .status-alert.error {
+      border-color: var(--red);
+      color: #fff1f1;
+      background: var(--red-bg);
+    }
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      border-top-color: #ffffff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .icon {
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .ide-section {
+      margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+    }
+    .ide-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .ide-section-title {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      color: var(--text-sub);
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 0;
+      white-space: nowrap;
+    }
+    .ide-search-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      flex: 1;
+      max-width: 220px;
+      min-width: 140px;
+    }
+    .ide-search-icon {
+      position: absolute;
+      left: 9px;
+      pointer-events: none;
+      color: #78a9ff;
+      opacity: 0.7;
+    }
+    .ide-search-input {
+      width: 100%;
+      height: 30px;
+      background: #181820;
+      border: 1px solid #383844;
+      border-radius: 4px;
+      color: #f4f4f4;
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 12px;
+      padding: 0 10px 0 28px;
+      outline: none;
+      box-sizing: border-box;
+      transition: all 0.15s ease;
+    }
+    .ide-search-input:focus {
+      border-color: #78a9ff;
+      background: #1e1e28;
+      box-shadow: 0 0 0 1px #78a9ff;
+    }
+    .ide-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    @media (max-width: 480px) {
+      .ide-section-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+      }
+      .ide-search-wrap {
+        width: 100%;
+        max-width: none;
+      }
+      .ide-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .btn-ide {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 38px;
+      padding: 0 12px;
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-main);
+      background: #24242c;
+      border: 1px solid #383844;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      text-align: center;
+      width: 100%;
+      box-sizing: border-box;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .btn-ide:hover:not(:disabled) {
+      background: #2f2f3a;
+      border-color: #606076;
+      color: #ffffff;
+      transform: translateY(-1px);
+    }
+    .btn-ide:active:not(:disabled) {
+      transform: translateY(0);
+    }
+    .btn-ide.primary-ide {
+      background: #1e2638;
+      border-color: #2e4474;
+      color: #d0e2ff;
+    }
+    .btn-ide.primary-ide:hover:not(:disabled) {
+      background: #263554;
+      border-color: #4589ff;
+      color: #ffffff;
+    }
+    .ide-toggle-btn {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      background: transparent;
+      border: 1px dashed #3a3a46;
+      border-radius: 3px;
+      padding: 9px 12px;
+      color: #a8a8a8;
+      font-size: 12px;
+      font-family: 'IBM Plex Mono', monospace;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      margin-top: 10px;
+    }
+    .ide-toggle-btn:hover {
+      color: #ffffff;
+      border-color: #78a9ff;
+      background: rgba(120, 169, 255, 0.05);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="masthead">
+      <div class="brand">
+        <img src="${getLogoDataUri()}" alt="Hostmagic Logo" style="width: 22px; height: 22px; border-radius: 50%; object-fit: cover; display: inline-block; vertical-align: middle;" onerror="this.onerror=null; this.src='/__hostmagic/magichost.webp';" />
+        <span>Hostmagic Gateway</span>
+      </div>
+      ${
+        matchedProject
+          ? `<div class="badge inactive"><span class="badge-dot"></span>Route Inactive</div>`
+          : `<div class="badge not-found"><span class="badge-dot"></span>Host Not Found</div>`
+      }
+    </div>
+
+    <div class="host-header">${safeHost}</div>
+    
+    <p class="desc">
+      ${
+        matchedProject
+          ? `This route belongs to project <span class="project-pill">${safeProjectName}</span>, but the development service is not currently running.`
+          : `No active local service is currently configured for <strong>${safeHost}</strong>.`
+      }
+    </p>
+
+    <div class="actions">
+      ${
+        matchedProject
+          ? `<button id="btnStart" class="btn btn-primary" onclick="startRoute('${safeProjectName}')">
+              <svg class="icon" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              Start ${safeProjectName}
+            </button>
+            <button id="btnInit" class="btn btn-secondary" onclick="initFolder('${safeHost}')">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+              Initialize / Link Folder (hm init)
+            </button>`
+          : `<button id="btnInit" class="btn btn-primary" onclick="initFolder('${safeHost}')">
+              <svg class="icon" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+              Initialize Project Folder (hm init)
+            </button>`
+      }
+      <a href="http://${HOSTMAGIC_SETTINGS_DOMAIN}" class="btn btn-ghost">
+        ⚙ Open Hostmagic Settings Hub
+      </a>
+    </div>
+
+    <div class="ide-section">
+      <div class="ide-section-header">
+        <div class="ide-section-title">
+          <svg class="icon" viewBox="0 0 24 24" width="14" height="14"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+          <span>IDE / Terminal</span>
+        </div>
+        <div class="ide-search-wrap">
+          <svg class="ide-search-icon" viewBox="0 0 24 24" width="13" height="13"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input 
+            type="text" 
+            id="ideSearchInput" 
+            class="ide-search-input" 
+            placeholder="Search IDE..." 
+            oninput="filterIdes()" 
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
+      </div>
+
+      <div id="primaryIdeGrid" class="ide-grid">
+        ${primaryButtonsHtml}
+      </div>
+
+      <button type="button" id="allIdesToggleBtn" class="ide-toggle-btn" onclick="toggleAllIdes()">
+        <span>More IDEs &amp; Editors (${moreIdes.length}+)</span>
+        <span id="allIdesToggleIcon">▾</span>
+      </button>
+
+      <div id="allIdesContainer" style="display: none; margin-top: 10px;">
+        <div class="ide-grid">
+          ${moreButtonsHtml}
+        </div>
+      </div>
+
+      <div id="noIdesMatch" style="display: none; padding: 16px 12px; text-align: center; color: var(--text-dim); font-size: 12.5px; font-family: 'IBM Plex Mono', monospace;">
+        No IDE matching search query.
+      </div>
+    </div>
+
+    <div id="statusAlert" class="status-alert" style="display: none;"></div>
+  </div>
+
+  <script>
+    const statusAlert = document.getElementById('statusAlert');
+    const btnStart = document.getElementById('btnStart');
+    const btnInit = document.getElementById('btnInit');
+
+    function setButtonsDisabled(disabled) {
+      if (btnStart) btnStart.disabled = disabled;
+      if (btnInit) btnInit.disabled = disabled;
+    }
+
+    function showStatus(message, type, showSpinner = true) {
+      if (!statusAlert) return;
+      statusAlert.style.display = 'flex';
+      statusAlert.className = 'status-alert ' + type;
+      statusAlert.innerHTML = (showSpinner ? '<div class="spinner"></div>' : '') + '<div>' + message + '</div>';
+    }
+
+    function hideStatus() {
+      if (!statusAlert) return;
+      statusAlert.style.display = 'none';
+      statusAlert.innerHTML = '';
+    }
+
+    async function startRoute(projectName) {
+      setButtonsDisabled(true);
+      showStatus('Starting services for <strong>' + projectName + '</strong>...', 'info', true);
+      
+      try {
+        const res = await fetch('/__hostmagic/api/projects/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: projectName })
+        });
+        const data = await res.json();
+        
+        if (res.ok && data.success) {
+          showStatus('Services started! Connecting to route...', 'success', true);
+          
+          let attempts = 0;
+          const maxAttempts = 20;
+          const checkInterval = setInterval(async () => {
+            attempts++;
+            try {
+              const ping = await fetch(window.location.href, { cache: 'no-store' });
+              if (ping.status !== 404 && ping.status !== 502 && ping.status !== 503) {
+                clearInterval(checkInterval);
+                window.location.reload();
+                return;
+              }
+            } catch {}
+            if (attempts >= maxAttempts) {
+              clearInterval(checkInterval);
+              window.location.reload();
+            }
+          }, 600);
+        } else {
+          setButtonsDisabled(false);
+          showStatus('Failed to start project: ' + (data.error || 'Unknown error'), 'error', false);
+        }
+      } catch (err) {
+        setButtonsDisabled(false);
+        showStatus('Error communicating with gateway: ' + err.message, 'error', false);
+      }
+    }
+
+    async function openInIde(ideId, projectName, domain) {
+      showStatus('Opening in <strong>' + ideId + '</strong>...', 'info', true);
+      try {
+        const res = await fetch('/__hostmagic/api/projects/open-ide', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ide: ideId, name: projectName, domain: domain })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          showStatus(data.message || 'Opened project in ' + ideId + '!', 'success', false);
+          setTimeout(() => {
+            hideStatus();
+          }, 4500);
+        } else if (data.needPath) {
+          showStatus('Project folder not linked yet. Select project directory to link and open...', 'info', true);
+          await initFolderAndOpen(domain, ideId);
+        } else {
+          showStatus('Could not open: ' + (data.error || data.message || 'Unknown error'), 'error', false);
+        }
+      } catch (err) {
+        showStatus('Error communicating with gateway: ' + err.message, 'error', false);
+      }
+    }
+
+    async function initFolderAndOpen(domain, ideId) {
+      try {
+        const res = await fetch('/__hostmagic/api/projects/init-folder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain: domain })
+        });
+        const data = await res.json();
+        if (data.cancelled) {
+          hideStatus();
+          return;
+        }
+        if (res.ok && data.success) {
+          showStatus('Folder linked! Launching <strong>' + ideId + '</strong>...', 'info', true);
+          await openInIde(ideId, data.project || '', domain);
+        } else {
+          showStatus('Folder selection failed: ' + (data.error || 'Unknown error'), 'error', false);
+        }
+      } catch (err) {
+        showStatus('Error during folder initialization: ' + err.message, 'error', false);
+      }
+    }
+
+    function toggleAllIdes() {
+      const container = document.getElementById('allIdesContainer');
+      const toggleIcon = document.getElementById('allIdesToggleIcon');
+      if (!container) return;
+      const isHidden = container.style.display === 'none';
+      container.style.display = isHidden ? 'block' : 'none';
+      if (toggleIcon) toggleIcon.textContent = isHidden ? '▴' : '▾';
+    }
+
+    function filterIdes() {
+      const input = document.getElementById('ideSearchInput');
+      const query = (input?.value || '').toLowerCase().trim();
+      const primaryGrid = document.getElementById('primaryIdeGrid');
+      const allContainer = document.getElementById('allIdesContainer');
+      const toggleBtn = document.getElementById('allIdesToggleBtn');
+      const noMatch = document.getElementById('noIdesMatch');
+
+      const primaryItems = primaryGrid ? primaryGrid.querySelectorAll('.ide-item') : [];
+      const moreItems = allContainer ? allContainer.querySelectorAll('.ide-item') : [];
+
+      if (!query) {
+        primaryItems.forEach(el => el.style.display = 'inline-flex');
+        moreItems.forEach(el => el.style.display = 'inline-flex');
+        if (toggleBtn) toggleBtn.style.display = 'flex';
+        const toggleIcon = document.getElementById('allIdesToggleIcon');
+        if (toggleIcon && toggleIcon.textContent === '▾') {
+          if (allContainer) allContainer.style.display = 'none';
+        } else {
+          if (allContainer) allContainer.style.display = 'block';
+        }
+        if (noMatch) noMatch.style.display = 'none';
+        return;
+      }
+
+      if (toggleBtn) toggleBtn.style.display = 'none';
+      if (allContainer) allContainer.style.display = 'block';
+
+      let visibleCount = 0;
+      primaryItems.forEach(el => {
+        const searchTerms = (el.getAttribute('data-search') || '') + ' ' + (el.textContent || '').toLowerCase();
+        const match = searchTerms.includes(query);
+        el.style.display = match ? 'inline-flex' : 'none';
+        if (match) visibleCount++;
+      });
+
+      moreItems.forEach(el => {
+        const searchTerms = (el.getAttribute('data-search') || '') + ' ' + (el.textContent || '').toLowerCase();
+        const match = searchTerms.includes(query);
+        el.style.display = match ? 'inline-flex' : 'none';
+        if (match) visibleCount++;
+      });
+
+      if (noMatch) {
+        noMatch.style.display = visibleCount === 0 ? 'block' : 'none';
+      }
+    }
+
+    async function initFolder(domain) {
+      setButtonsDisabled(true);
+      showStatus('Opening folder picker... Select project directory', 'info', true);
+      
+      try {
+        const res = await fetch('/__hostmagic/api/projects/init-folder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain: domain })
+        });
+        const data = await res.json();
+        
+        if (data.cancelled) {
+          setButtonsDisabled(false);
+          hideStatus();
+          return;
+        }
+
+        if (res.ok && data.success) {
+          showStatus('Initialized project <strong>' + (data.project || '') + '</strong>! Starting services...', 'success', true);
+          setTimeout(() => {
+            window.location.reload();
+          }, 1800);
+        } else {
+          setButtonsDisabled(false);
+          showStatus('Initialization failed: ' + (data.error || 'Unknown error'), 'error', false);
+        }
+      } catch (err) {
+        setButtonsDisabled(false);
+        showStatus('Error during folder initialization: ' + err.message, 'error', false);
+      }
+    }
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/__hostmagic/sw.js', { scope: '/' }).catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>`;
   }
 
   public async start(port: number = 80, oauthPort: number = 3000): Promise<void> {

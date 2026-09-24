@@ -133,6 +133,8 @@ export async function runCommand(): Promise<void> {
       }
       env.NEXT_PUBLIC_APP_URL = cleanUrl;
       env.VITE_APP_URL = cleanUrl;
+      env.FAST_REFRESH = 'true';
+      env.FORCE_COLOR = '1';
       // Zero-config OAuth: Mask/proxy all requests to login through localhost:3000
       // to comply with Google Cloud Console and strict OAuth 2.0 provider policies
       env.NEXTAUTH_URL = 'http://localhost:3000';

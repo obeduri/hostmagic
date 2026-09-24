@@ -15,6 +15,7 @@ export interface StartCommandOptions {
   port?: string | number;
   oauthPort?: string | number;
   open?: boolean;
+  showProjectLogs?: boolean;
 }
 
 export async function openBrowser(url: string): Promise<void> {
@@ -206,7 +207,9 @@ export async function startCommand(options?: StartCommandOptions): Promise<void>
   }
 
   // 5. Initialize and start the ReverseProxyServer
-  const proxyServer = new ReverseProxyServer(initialProject);
+  const proxyServer = new ReverseProxyServer(initialProject, {
+    showProjectLogs: options?.showProjectLogs,
+  });
   try {
     await proxyServer.start(port, oauthPort);
   } catch (err: any) {

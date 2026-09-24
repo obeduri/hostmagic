@@ -5,6 +5,7 @@ import { startCommand } from './commands/start.js';
 import { cleanCommand } from './commands/clean.js';
 import { hostfileCommand } from './commands/hostfile.js';
 import { refreshSettingsCommand } from './commands/refresh-settings.js';
+import { autostartCommand } from './commands/autostart.js';
 
 const program = new Command();
 
@@ -63,6 +64,7 @@ program
   .option('-p, --port <port>', 'Gateway listening port (default: 80)', '80')
   .option('--oauth-port <port>', 'OAuth bridge listening port (default: 3000)', '3000')
   .option('-o, --open', 'Open hostmagic.settings in your default browser')
+  .option('--show-project-logs', 'Stream child project stdout/stderr to gateway console (default: false)')
   .action(async (options) => {
     try {
       await startCommand(options);
@@ -121,6 +123,22 @@ program
   .action(async () => {
     try {
       await refreshSettingsCommand();
+    } catch (err: any) {
+      console.error(err.message || err);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('autostart')
+  .alias('startup')
+  .description('Configure or inspect whether Hostmagic Gateway starts automatically on OS boot')
+  .option('-e, --enable', 'Enable starting on Operating System boot')
+  .option('-d, --disable', 'Disable starting on Operating System boot')
+  .option('-s, --status', 'Display current OS autostart status')
+  .action(async (options) => {
+    try {
+      await autostartCommand(options);
     } catch (err: any) {
       console.error(err.message || err);
       process.exit(1);

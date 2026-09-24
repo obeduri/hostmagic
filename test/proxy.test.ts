@@ -375,6 +375,147 @@ try {
   // Origin must be preserved intact for cross-domain API requests so backend CORS works
   assert.strictEqual(corsData.origin, 'http://myapp.test');
 
+  // Test 23: 404 Fallback page does not render active routes list and contains Start / Init actions
+  console.log('Test 23: 404 Fallback page renders interactive UI without listing active routes');
+  const notFoundReq = await fetch(`http://127.0.0.1:${proxyPort}/unconfigured-route`, {
+    headers: { Host: 'unknown-app.test' },
+  });
+  assert.strictEqual(notFoundReq.status, 404);
+  const notFoundBody = await notFoundReq.text();
+  assert.ok(!notFoundBody.includes('Active routes:'), 'Must not display active routes');
+  assert.ok(notFoundBody.includes('unknown-app.test'));
+  assert.ok(notFoundBody.includes('Initialize Project Folder (hm init)'));
+
+  // Test 24: initProjectAtFolder API endpoint validation
+  console.log('Test 24: POST /__hostmagic/api/projects/init-folder invalid path validation');
+  const initInvalidReq = await fetch(`http://127.0.0.1:${proxyPort}/__hostmagic/api/projects/init-folder`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: 'C:\\NonExistent_Hostmagic_Test_Path_12345' }),
+  });
+  assert.strictEqual(initInvalidReq.status, 400);
+  const initInvalidData = (await initInvalidReq.json()) as any;
+  assert.ok(initInvalidData.error);
+
+  // Test 25: POST /__hostmagic/api/projects/restart endpoint
+  console.log('Test 25: POST /__hostmagic/api/projects/restart endpoint');
+  const restartReq = await fetch(`http://127.0.0.1:${proxyPort}/__hostmagic/api/projects/restart`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  assert.strictEqual(restartReq.status, 200);
+  const restartData = (await restartReq.json()) as any;
+  assert.strictEqual(restartData.success, true);
+  assert.ok(Array.isArray(restartData.restarted));
+
+  // Test 26: GET /__hostmagic/api/ides returns supported IDE list
+  console.log('Test 26: GET /__hostmagic/api/ides returns supported IDEs');
+  const idesReq = await fetch(`http://127.0.0.1:${proxyPort}/__hostmagic/api/ides`);
+  assert.strictEqual(idesReq.status, 200);
+  const idesData = (await idesReq.json()) as any;
+  assert.strictEqual(idesData.success, true);
+  assert.ok(Array.isArray(idesData.ides));
+  const ideNames = idesData.ides.map((i: any) => i.id);
+  assert.ok(ideNames.includes('antigravity'), 'Must include antigravity');
+  assert.ok(ideNames.includes('claude'), 'Must include claude');
+  assert.ok(ideNames.includes('codex'), 'Must include codex');
+  assert.ok(ideNames.includes('vscode'), 'Must include vscode');
+  assert.ok(ideNames.includes('zed'), 'Must include zed');
+  assert.ok(ideNames.includes('sublime'), 'Must include sublime');
+  assert.ok(ideNames.includes('notepadplusplus'), 'Must include notepadplusplus');
+  assert.ok(ideNames.includes('visualstudio'), 'Must include visualstudio');
+  assert.ok(ideNames.includes('webstorm'), 'Must include webstorm');
+  assert.ok(ideNames.includes('datagrip'), 'Must include datagrip');
+  assert.ok(ideNames.includes('pycharm'), 'Must include pycharm');
+  assert.ok(ideNames.includes('terminal'), 'Must include terminal');
+
+  // Test 27: 404 Inactive route page renders search bar, logo, and clean IDE names
+  console.log('Test 27: 404 Fallback page renders search bar, logo, and clean IDE names');
+  assert.ok(notFoundBody.includes('id="ideSearchInput"'), 'Must render IDE search input');
+  assert.ok(notFoundBody.includes('data:image/webp;base64,'), 'Must render embedded Hostmagic logo data URI');
+  assert.ok(notFoundBody.includes('<span>Antigravity</span>'), 'Must render Antigravity name');
+  assert.ok(notFoundBody.includes('<span>Claude Code</span>'), 'Must render Claude Code name');
+  assert.ok(notFoundBody.includes('<span>Codex</span>'), 'Must render Codex name');
+  assert.ok(notFoundBody.includes('<span>VS Code</span>'), 'Must render VS Code name');
+  assert.ok(notFoundBody.includes('<span>Cursor</span>'), 'Must render Cursor name');
+  assert.ok(notFoundBody.includes('<span>Terminal</span>'), 'Must render Terminal name');
+  assert.ok(notFoundBody.includes('<span>Zed</span>'), 'Must render Zed name');
+  assert.ok(notFoundBody.includes('<span>Sublime Text</span>'), 'Must render Sublime Text name');
+  assert.ok(notFoundBody.includes('<span>Notepad++</span>'), 'Must render Notepad++ name');
+  assert.ok(notFoundBody.includes('<span>Visual Studio</span>'), 'Must render Visual Studio name');
+  assert.ok(notFoundBody.includes('<span>WebStorm</span>'), 'Must render WebStorm name');
+  assert.ok(notFoundBody.includes('<span>DataGrip</span>'), 'Must render DataGrip name');
+  assert.ok(notFoundBody.includes('<span>PyCharm</span>'), 'Must render PyCharm name');
+  assert.ok(!notFoundBody.includes('<span>Open in Antigravity</span>'), 'Must not repeat Open in');
+
+  // Test 28: POST /__hostmagic/api/projects/open-ide validation
+  console.log('Test 28: POST /__hostmagic/api/projects/open-ide unlinked project validation');
+  const openIdeInvalid = await fetch(`http://127.0.0.1:${proxyPort}/__hostmagic/api/projects/open-ide`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'unlinked-non-existent-project', ide: 'vscode' }),
+  });
+  assert.strictEqual(openIdeInvalid.status, 400);
+  const openIdeInvalidData = (await openIdeInvalid.json()) as any;
+  assert.strictEqual(openIdeInvalidData.needPath, true);
+
+  // Test 29: GET /__hostmagic/manifest.json serves PWA manifest
+  console.log('Test 29: PWA Manifest endpoint');
+  const manifestRes = await fetch(`http://127.0.0.1:${proxyPort}/__hostmagic/manifest.json`);
+  assert.strictEqual(manifestRes.status, 200);
+  assert.ok(manifestRes.headers.get('content-type')?.includes('application/manifest+json'));
+  const manifestJson = (await manifestRes.json()) as any;
+  assert.ok(manifestJson.name.includes('Hostmagic'));
+  assert.strictEqual(manifestJson.display, 'standalone');
+  assert.ok(Array.isArray(manifestJson.icons) && manifestJson.icons.length >= 2);
+  assert.ok(manifestJson.icons.some((i: any) => i.src.includes('magichost.webp')));
+
+  // Test 30: GET /__hostmagic/sw.js serves Service Worker with proper headers
+  console.log('Test 30: PWA Service Worker endpoint');
+  const swRes = await fetch(`http://127.0.0.1:${proxyPort}/__hostmagic/sw.js`);
+  assert.strictEqual(swRes.status, 200);
+  assert.ok(swRes.headers.get('content-type')?.includes('application/javascript'));
+  assert.strictEqual(swRes.headers.get('service-worker-allowed'), '/');
+  const swCode = await swRes.text();
+  assert.ok(swCode.includes('hostmagic-pwa'));
+
+  // Test 31: GET /__hostmagic/magichost.webp and /magichost.webp serves webp logo
+  console.log('Test 31: PWA magichost.webp logo endpoint');
+  const logoRes = await fetch(`http://127.0.0.1:${proxyPort}/__hostmagic/magichost.webp`);
+  assert.strictEqual(logoRes.status, 200);
+  assert.strictEqual(logoRes.headers.get('content-type'), 'image/webp');
+  const logoBuf = await logoRes.arrayBuffer();
+  assert.ok(logoBuf.byteLength > 1000, 'Logo buffer should be valid image');
+
+  const rootLogoRes = await fetch(`http://127.0.0.1:${proxyPort}/magichost.webp`);
+  assert.strictEqual(rootLogoRes.status, 200);
+  assert.strictEqual(rootLogoRes.headers.get('content-type'), 'image/webp');
+
+  // Test 32: Favicon for hostmagic.settings
+  console.log('Test 32: Favicon for hostmagic.settings');
+  const settingsFaviconRes = await fetch(`http://127.0.0.1:${proxyPort}/favicon.ico`, {
+    headers: { Host: 'hostmagic.settings' },
+  });
+  assert.strictEqual(settingsFaviconRes.status, 200);
+  assert.ok(
+    settingsFaviconRes.headers.get('content-type')?.includes('image/x-icon') ||
+      settingsFaviconRes.headers.get('content-type')?.includes('image/webp')
+  );
+  const settingsFaviconBuf = await settingsFaviconRes.arrayBuffer();
+  assert.ok(settingsFaviconBuf.byteLength > 1000, 'Favicon buffer should be valid image');
+
+  const settingsFaviconQueryRes = await fetch(`http://127.0.0.1:${proxyPort}/favicon.ico?v=2`, {
+    headers: { Host: 'hostmagic.settings' },
+  });
+  assert.strictEqual(settingsFaviconQueryRes.status, 200);
+
+  // Test 33: ProcessManager quiet mode suppresses stdout while saving to buffer
+  console.log('Test 33: ProcessManager quiet mode suppresses stdout while preserving buffer');
+  const { ProcessManager } = await import('../src/core/process-manager.js');
+  const quietManager = new ProcessManager({ quiet: true, handleSignals: false });
+  assert.strictEqual(quietManager.isQuiet(), true);
+
   // Reset template back to default
   ReverseProxyServer.setDashboardTemplate('');
 

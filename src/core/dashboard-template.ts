@@ -9,6 +9,15 @@ export function getDefaultDashboardTemplate(): string {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Hostmagic Settings &amp; Gateway</title>
+  <link rel="manifest" href="/__hostmagic/manifest.json" />
+  <link rel="icon" type="image/webp" href="/magichost.webp" />
+  <link rel="icon" type="image/webp" href="/__hostmagic/magichost.webp" />
+  <link rel="shortcut icon" href="/favicon.ico" />
+  <link rel="apple-touch-icon" href="/magichost.webp" />
+  <meta name="theme-color" content="#161616" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Hostmagic" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:wght@300;400;600&display=swap" rel="stylesheet" />
@@ -215,11 +224,32 @@ export function getDefaultDashboardTemplate(): string {
       justify-content: center;
       width: 32px;
       height: 32px;
-      background: #0f62fe;
+      background: transparent;
       color: #ffffff;
-      border-radius: 0;
+      border-radius: 50%;
       flex-shrink: 0;
       line-height: 1;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+
+    .brand-mark img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .pwa-install-btn {
+      background: var(--cds-interactive) !important;
+      color: #ffffff !important;
+      border-color: var(--cds-interactive) !important;
+      font-weight: 500;
+    }
+
+    .pwa-install-btn:hover {
+      background: var(--cds-button-primary-hover) !important;
+      color: #ffffff !important;
     }
 
     .masthead-title-group {
@@ -291,6 +321,85 @@ export function getDefaultDashboardTemplate(): string {
     .masthead-btn:focus-visible {
       outline: 2px solid #0f62fe;
       outline-offset: -2px;
+    }
+
+    /* Carbon Toggle Switch for Start on Boot */
+    .carbon-toggle-wrapper {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      height: 32px;
+      border: 1px solid var(--cds-border-subtle);
+      background: transparent;
+      user-select: none;
+      cursor: pointer;
+      transition: background-color 0.15s, border-color 0.15s;
+    }
+
+    .carbon-toggle-wrapper:hover {
+      background-color: var(--cds-layer-hover);
+      border-color: var(--cds-border-strong);
+    }
+
+    .toggle-label-text {
+      font-size: 12px;
+      font-family: 'IBM Plex Sans', sans-serif;
+      color: var(--cds-masthead-subtle);
+      letter-spacing: 0.16px;
+    }
+
+    .carbon-toggle-switch {
+      background: transparent;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      pointer-events: none;
+    }
+
+    .carbon-toggle-track {
+      width: 28px;
+      height: 16px;
+      background-color: var(--cds-border-strong);
+      border-radius: 16px;
+      position: relative;
+      transition: background-color 0.15s cubic-bezier(0.2, 0, 0.38, 0.9);
+      display: inline-block;
+    }
+
+    .carbon-toggle-dot {
+      width: 12px;
+      height: 12px;
+      background-color: #ffffff;
+      border-radius: 50%;
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      transition: transform 0.15s cubic-bezier(0.2, 0, 0.38, 0.9);
+    }
+
+    .carbon-toggle-switch[aria-checked="true"] .carbon-toggle-track {
+      background-color: var(--cds-button-primary);
+    }
+
+    .carbon-toggle-switch[aria-checked="true"] .carbon-toggle-dot {
+      transform: translateX(12px);
+    }
+
+    .carbon-toggle-status {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--cds-text-helper);
+      min-width: 20px;
+      text-transform: uppercase;
+    }
+
+    .carbon-toggle-switch[aria-checked="true"] .carbon-toggle-status {
+      color: var(--cds-interactive);
     }
 
     /* Main Content Layout */
@@ -374,6 +483,24 @@ export function getDefaultDashboardTemplate(): string {
       background-color: var(--cds-button-danger-hover);
     }
 
+    .btn-danger-outline {
+      background-color: transparent;
+      border: 1px solid var(--cds-button-danger);
+      color: var(--cds-support-error);
+    }
+    .btn-danger-outline:hover {
+      background-color: var(--cds-button-danger);
+      color: var(--cds-text-on-color);
+      border-color: var(--cds-button-danger);
+    }
+    .btn-danger-outline:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      border-color: var(--cds-border-subtle);
+      color: var(--cds-text-helper);
+      background-color: transparent;
+    }
+
     .btn-success {
       background-color: var(--cds-button-success);
       color: var(--cds-text-on-color);
@@ -386,6 +513,14 @@ export function getDefaultDashboardTemplate(): string {
       height: 32px;
       padding: 0 12px;
       font-size: 13px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .spin {
+      display: inline-block;
+      animation: spin 0.8s linear infinite;
     }
 
     /* Carbon Metric Tiles Grid (8px grid alignment) */
@@ -922,6 +1057,63 @@ export function getDefaultDashboardTemplate(): string {
       width: 95vw;
     }
 
+    dialog#projectIdeModal {
+      max-width: 820px;
+    }
+
+    .dashboard-ide-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+      max-height: 420px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .btn-dashboard-ide {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 42px;
+      padding: 0 14px;
+      background: var(--cds-layer-01);
+      border: 1px solid var(--cds-border-subtle);
+      color: var(--cds-text-primary);
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border-radius: 0;
+      transition: background 0.15s, border-color 0.15s, transform 0.1s;
+      text-align: left;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .btn-dashboard-ide:hover {
+      background: var(--cds-layer-hover);
+      border-color: var(--cds-interactive);
+      color: #ffffff;
+      transform: translateY(-1px);
+    }
+
+    .btn-dashboard-ide svg {
+      flex-shrink: 0;
+      color: var(--cds-interactive);
+    }
+
+    .btn-dashboard-ide.primary {
+      background: rgba(15, 98, 254, 0.08);
+      border-color: rgba(15, 98, 254, 0.3);
+    }
+
+    .btn-dashboard-ide.primary:hover {
+      background: rgba(15, 98, 254, 0.18);
+      border-color: var(--cds-interactive);
+    }
+
     dialog::backdrop {
       background-color: var(--cds-overlay-backdrop);
     }
@@ -1049,29 +1241,175 @@ export function getDefaultDashboardTemplate(): string {
       align-items: center;
     }
 
-    /* Carbon Toast */
-    .toast {
+    /* Sileo Toast Notification Engine */
+    #sileo-toaster {
       position: fixed;
-      bottom: 24px;
+      top: 24px;
       right: 24px;
-      background-color: #161616;
-      color: #ffffff;
-      border-left: 4px solid #0f62fe;
-      border-radius: 0;
-      padding: 14px 20px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-      font-size: 14px;
-      letter-spacing: 0.16px;
-      z-index: 9999;
-      opacity: 0;
-      transform: translateY(8px);
-      transition: opacity 0.2s, transform 0.2s;
+      z-index: 99999;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
       pointer-events: none;
+      max-width: 420px;
+      width: calc(100vw - 48px);
     }
 
-    .toast.show {
+    .sileo-toast {
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px 10px 12px;
+      background: rgba(26, 26, 30, 0.94);
+      backdrop-filter: blur(16px) saturate(180%);
+      -webkit-backdrop-filter: blur(16px) saturate(180%);
+      color: #f4f4f4;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 9999px;
+      box-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.06);
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 13.5px;
+      letter-spacing: 0.12px;
+      cursor: pointer;
+      user-select: none;
+      position: relative;
+      overflow: hidden;
+      transform-origin: top right;
+      animation: sileoSpringIn 0.44s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+      transition: transform 0.15s cubic-bezier(0.2, 0, 0.38, 0.9), box-shadow 0.15s, opacity 0.25s;
+    }
+
+    [data-theme="light"] .sileo-toast {
+      background: rgba(255, 255, 255, 0.94);
+      color: #161616;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      box-shadow: 0 14px 32px -6px rgba(0, 0, 0, 0.15), 0 2px 6px rgba(0, 0, 0, 0.08);
+    }
+
+    .sileo-toast:hover {
+      transform: scale(1.02);
+      box-shadow: 0 20px 42px -6px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.18);
+    }
+
+    .sileo-toast.sileo-dismissing {
+      animation: sileoSpringOut 0.26s cubic-bezier(0.4, 0, 1, 1) forwards;
+    }
+
+    .sileo-icon-capsule {
+      width: 28px;
+      height: 28px;
+      min-width: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #ffffff;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+    }
+
+    .sileo-icon-capsule.success {
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+    }
+
+    .sileo-icon-capsule.error {
+      background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+      box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+    }
+
+    .sileo-icon-capsule.warning {
+      background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+      box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
+    }
+
+    .sileo-icon-capsule.info {
+      background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+      box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+    }
+
+    .sileo-content {
+      flex: 1;
+      font-weight: 450;
+      line-height: 1.35;
+      padding-right: 4px;
+    }
+
+    .sileo-close-btn {
+      background: transparent;
+      border: none;
+      color: var(--cds-text-helper);
+      cursor: pointer;
+      padding: 2px 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      opacity: 0.6;
+      transition: opacity 0.15s, color 0.15s;
+    }
+
+    .sileo-close-btn:hover {
       opacity: 1;
-      transform: translateY(0);
+      color: var(--cds-text-primary);
+    }
+
+    .sileo-progress {
+      position: absolute;
+      bottom: 0;
+      left: 18px;
+      right: 18px;
+      height: 2px;
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .sileo-progress-bar {
+      height: 100%;
+      width: 100%;
+      transform-origin: left;
+      animation: sileoProgress linear forwards;
+    }
+
+    .sileo-toast.success .sileo-progress-bar { background: #10b981; }
+    .sileo-toast.error .sileo-progress-bar { background: #ef4444; }
+    .sileo-toast.warning .sileo-progress-bar { background: #f59e0b; }
+    .sileo-toast.info .sileo-progress-bar { background: #3b82f6; }
+
+    @keyframes sileoSpringIn {
+      0% {
+        opacity: 0;
+        transform: translateY(-18px) scale(0.85);
+        filter: blur(4px);
+      }
+      60% {
+        opacity: 1;
+        transform: translateY(3px) scale(1.02);
+        filter: blur(0);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0);
+      }
+    }
+
+    @keyframes sileoSpringOut {
+      0% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+      100% {
+        opacity: 0;
+        transform: translateY(-12px) scale(0.9);
+        filter: blur(3px);
+      }
+    }
+
+    @keyframes sileoProgress {
+      from { transform: scaleX(1); }
+      to { transform: scaleX(0); }
     }
 
     /* Empty state */
@@ -1121,9 +1459,7 @@ export function getDefaultDashboardTemplate(): string {
     <div class="masthead-container">
       <div class="masthead-left">
         <div class="brand-mark" title="Hostmagic Gateway">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-          </svg>
+          <img src="/__hostmagic/magichost.webp" alt="Hostmagic" onerror="this.onerror=null; this.parentElement.innerHTML='<svg width=\'18\' height=\'18\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'><polygon points=\'13 2 3 14 12 14 11 22 21 10 12 10 13 2\'></polygon></svg>';" />
         </div>
         <div class="masthead-title-group">
           <div class="brand-name">
@@ -1136,10 +1472,29 @@ export function getDefaultDashboardTemplate(): string {
         </div>
       </div>
       <div class="masthead-right">
+        <button class="masthead-btn pwa-install-btn" id="pwaInstallBtn" onclick="installPwaApp()" title="Install Hostmagic PWA" style="display: none;">
+          <span class="icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+          </span>
+          <span>Install App</span>
+        </button>
         <button class="masthead-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Switch Carbon theme">
           <span class="icon" id="themeToggleIcon"></span>
           <span id="themeToggleText">Light</span>
         </button>
+        <div class="carbon-toggle-wrapper" id="autostartToggleWrapper" title="Automatically start Hostmagic Gateway when operating system boots" onclick="toggleAutostartSetting()">
+          <span class="toggle-label-text">Start on Boot</span>
+          <button type="button" class="carbon-toggle-switch" id="autostartToggleBtn" role="switch" aria-checked="false">
+            <span class="carbon-toggle-track">
+              <span class="carbon-toggle-dot"></span>
+            </span>
+            <span class="carbon-toggle-status" id="autostartStatusText">Off</span>
+          </button>
+        </div>
         <button class="masthead-btn" onclick="loadDashboard(true)" title="Refresh data">
           <span class="icon">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1149,6 +1504,14 @@ export function getDefaultDashboardTemplate(): string {
             </svg>
           </span>
           <span>Refresh</span>
+        </button>
+        <button class="masthead-btn" id="btnRestartMasthead" onclick="restartFromMasthead()" title="Restart running projects">
+          <span class="icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5A10 10 0 0 1 18.8 4.2M22 12.5a10 10 0 0 1-18.8 4.2"></path>
+            </svg>
+          </span>
+          <span>Restart</span>
         </button>
         <button class="btn btn-secondary btn-sm" onclick="openAddRouteModal()" title="Add Custom Route">
           <span class="icon">
@@ -1473,7 +1836,7 @@ export function getDefaultDashboardTemplate(): string {
             <line x1="17" y1="16" x2="23" y2="16"></line>
           </svg>
         </span>
-        <span>Customize Appearance: <span id="customizeProjectTitle" style="color: var(--cds-interactive);">project</span></span>
+        <span>Project Config: <span id="customizeProjectTitle" style="color: var(--cds-interactive);">project</span></span>
       </h3>
       <button class="dialog-close-btn" onclick="closeCustomizeModal()" title="Close dialog">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1520,13 +1883,54 @@ export function getDefaultDashboardTemplate(): string {
       </div>
     </div>
     <div class="dialog-footer">
+      <button type="button" class="btn btn-danger-outline" id="customizeForgetBtn" onclick="forgetCurrentProject()" style="margin-right: auto;" title="Remove project from dashboard">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+        Forget Project
+      </button>
       <button class="btn btn-secondary" onclick="closeCustomizeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveProjectCustomization()">Save Appearance</button>
+      <button class="btn btn-primary" onclick="saveProjectCustomization()">Save Config</button>
     </div>
   </dialog>
 
-  <!-- Toast Notification -->
-  <div id="toast" class="toast"></div>
+  <!-- HTML5 Native Dialog for Opening Project in IDE / Terminal -->
+  <dialog id="projectIdeModal">
+    <div class="dialog-header">
+      <h3>
+        <span class="icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline>
+          </svg>
+        </span>
+        <span>Open <span id="projectIdeModalTarget" style="font-family: 'IBM Plex Mono', monospace; font-weight: 600; color: var(--cds-interactive);">project</span> in IDE / Terminal</span>
+      </h3>
+      <button class="dialog-close-btn" onclick="closeProjectIdeModal()" title="Close dialog">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <div class="form-group" style="margin-bottom: 8px;">
+        <input 
+          type="text" 
+          id="projectIdeSearchInput" 
+          class="carbon-input" 
+          placeholder="Filter IDEs (e.g. antigravity, claude, codex, vscode, pycharm, zed)..." 
+          oninput="filterProjectIdes()" 
+          style="width: 100%; box-sizing: border-box;" 
+        />
+      </div>
+      <div class="dashboard-ide-grid" id="projectIdeButtonsContainer">
+      </div>
+    </div>
+    <div class="dialog-footer">
+      <button class="btn btn-secondary" onclick="closeProjectIdeModal()">Close</button>
+    </div>
+  </dialog>
+
+  <!-- Sileo Physics-Based Toast Notifications Container -->
+  <div id="sileo-toaster"></div>
 
   <script>
     // --- Available React-Icons (Feather/Carbon Icons) ---
@@ -1577,6 +1981,7 @@ export function getDefaultDashboardTemplate(): string {
       chevron: '<span class="icon accordion-chevron"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span>',
       sliders: '<span class="icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg></span>',
       play: '<span class="icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></span>',
+      restart: '<span class="icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5A10 10 0 0 1 18.8 4.2M22 12.5a10 10 0 0 1-18.8 4.2"></path></svg></span>',
       stop: '<span class="icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16"></rect></svg></span>',
       terminal: '<span class="icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg></span>',
       trash: '<span class="icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></span>',
@@ -1672,6 +2077,58 @@ export function getDefaultDashboardTemplate(): string {
 
     initTheme();
 
+    // --- Operating System Autostart Management ---
+    let autostartEnabled = false;
+
+    async function fetchAutostartStatus() {
+      try {
+        const res = await fetch('/__hostmagic/api/autostart');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success) {
+            updateAutostartUI(Boolean(data.enabled));
+          }
+        }
+      } catch {}
+    }
+
+    function updateAutostartUI(enabled) {
+      autostartEnabled = Boolean(enabled);
+      const btn = document.getElementById('autostartToggleBtn');
+      const statusText = document.getElementById('autostartStatusText');
+      if (btn) btn.setAttribute('aria-checked', autostartEnabled ? 'true' : 'false');
+      if (statusText) statusText.textContent = autostartEnabled ? 'ON' : 'OFF';
+    }
+
+    async function toggleAutostartSetting() {
+      const nextState = !autostartEnabled;
+      updateAutostartUI(nextState);
+      try {
+        const res = await fetch('/__hostmagic/api/autostart', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: nextState })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          updateAutostartUI(Boolean(data.enabled));
+          if (data.enabled) {
+            sileo.success('Hostmagic configured to start on OS boot');
+          } else {
+            sileo.info('Start on OS boot disabled');
+          }
+        } else {
+          updateAutostartUI(!nextState);
+          sileo.error('Failed to change startup setting: ' + (data.error || 'Unknown error'));
+        }
+      } catch (err) {
+        updateAutostartUI(!nextState);
+        sileo.error('Error connecting to gateway: ' + err.message);
+      }
+    }
+
+    fetchAutostartStatus();
+
     // --- Project Appearance & Customization (React-Icons & Border Colors) ---
     let currentCustomizingProject = null;
     let currentSelectedIcon = 'box';
@@ -1701,6 +2158,120 @@ export function getDefaultDashboardTemplate(): string {
       };
     }
 
+    let currentIdeProject = null;
+
+    const DASHBOARD_IDES = [
+      { id: 'antigravity', name: 'Antigravity', label: 'Open in Antigravity', primary: true, icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>' },
+      { id: 'claude', name: 'Claude Code', label: 'Open in Claude Code', primary: true, icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10H12V2z"></path><path d="M12 12 2.1 12a10.1 10.1 0 0 0 1.9 4"></path></svg>' },
+      { id: 'codex', name: 'Codex', label: 'Open in Codex', primary: true, icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>' },
+      { id: 'vscode', name: 'VS Code', label: 'Open in VS Code', primary: true, icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>' },
+      { id: 'cursor', name: 'Cursor', label: 'Open in Cursor', primary: true, icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 3 10.07 19.97 12.58 12.58 19.97 10.07 3 3"></polygon></svg>' },
+      { id: 'terminal', name: 'Terminal', label: 'Open in Terminal', primary: true, icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>' },
+      { id: 'zed', name: 'Zed', label: 'Open in Zed', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16l-16 16h16"></path></svg>' },
+      { id: 'sublime', name: 'Sublime Text', label: 'Open in Sublime Text', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 8 16-4-16 8 16-4-16 8 16-4"></path></svg>' },
+      { id: 'notepadplusplus', name: 'Notepad++', label: 'Open in Notepad++', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>' },
+      { id: 'visualstudio', name: 'Visual Studio', label: 'Open in Visual Studio', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 6-8 6 8 6V6z"></path><path d="M6 18V6l4 3-4 3 8 6"></path></svg>' },
+      { id: 'webstorm', name: 'WebStorm', label: 'Open in WebStorm', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="m7 15 3-6 2 4 2-4 3 6"></path></svg>' },
+      { id: 'datagrip', name: 'DataGrip', label: 'Open in DataGrip', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>' },
+      { id: 'pycharm', name: 'PyCharm', label: 'Open in PyCharm', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M7 9h4a2 2 0 1 1 0 4H7z"></path></svg>' },
+      { id: 'intellij', name: 'IntelliJ IDEA', label: 'Open in IntelliJ IDEA', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="7" y1="8" x2="7" y2="16"></line><path d="M11 16h4a2 2 0 0 2 2-2V8"></path></svg>' },
+      { id: 'androidstudio', name: 'Android Studio', label: 'Open in Android Studio', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4v1H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"></path></svg>' },
+      { id: 'phpstorm', name: 'PhpStorm', label: 'Open in PhpStorm', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M7 15V9h3a2 2 0 1 1 0 4H7"></path></svg>' },
+      { id: 'goland', name: 'GoLand', label: 'Open in GoLand', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="10" cy="12" r="3"></circle></svg>' },
+      { id: 'clion', name: 'CLion', label: 'Open in CLion', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M10 9a3 3 0 0 0-3 3v0a3 3 0 0 0 3 3"></path></svg>' },
+      { id: 'rider', name: 'Rider', label: 'Open in Rider', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M8 9h4a2 2 0 1 1 0 4H8v3"></path></svg>' },
+      { id: 'rubymine', name: 'RubyMine', label: 'Open in RubyMine', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 18 3 22 9 12 22 2 9 6 3"></polygon></svg>' },
+      { id: 'fleet', name: 'Fleet', label: 'Open in Fleet', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path></svg>' },
+      { id: 'windsurf', name: 'Windsurf', label: 'Open in Windsurf', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h20M2 12l5-5m-5 5 5 5M22 12l-5-5m5 5-5 5"></path></svg>' },
+      { id: 'void', name: 'Void', label: 'Open in Void', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="4"></circle></svg>' },
+      { id: 'positron', name: 'Positron', label: 'Open in Positron', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M3 12h3m12 0h3M12 3v3m0 12v3"></path></svg>' },
+      { id: 'trae', name: 'Trae', label: 'Open in Trae', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"></path></svg>' },
+      { id: 'neovim', name: 'Neovim', label: 'Open in Neovim', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 20 4 4 10 4 20 20 20 4"></polyline></svg>' },
+      { id: 'helix', name: 'Helix', label: 'Open in Helix', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h4v16H4zM16 4h4v16h-4z"></path></svg>' },
+      { id: 'emacs', name: 'Emacs', label: 'Open in Emacs', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7c0-2.2 3.6-4 8-4s8 1.8 8 4-3.6 4-8 4-8-1.8-8-4z"></path></svg>' },
+      { id: 'eclipse', name: 'Eclipse', label: 'Open in Eclipse', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle></svg>' },
+      { id: 'xcode', name: 'Xcode', label: 'Open in Xcode', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77"></path></svg>' },
+      { id: 'explorer', name: 'File Explorer', label: 'Open in File Explorer', icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>' },
+    ];
+
+    function openProjectIdeModal(projectName) {
+      currentIdeProject = projectName;
+      const targetEl = document.getElementById('projectIdeModalTarget');
+      if (targetEl) targetEl.textContent = projectName;
+      const searchInput = document.getElementById('projectIdeSearchInput');
+      if (searchInput) searchInput.value = '';
+
+      renderProjectIdeButtons();
+      const modal = document.getElementById('projectIdeModal');
+      if (modal && typeof modal.showModal === 'function') {
+        modal.showModal();
+        if (searchInput) searchInput.focus();
+      }
+    }
+
+    function closeProjectIdeModal() {
+      const modal = document.getElementById('projectIdeModal');
+      if (modal && typeof modal.close === 'function') {
+        modal.close();
+      }
+      currentIdeProject = null;
+    }
+
+    function renderProjectIdeButtons(filter = '') {
+      const container = document.getElementById('projectIdeButtonsContainer');
+      if (!container) return;
+      const cleanFilter = filter.toLowerCase().trim();
+
+      const filtered = DASHBOARD_IDES.filter(ide =>
+        !cleanFilter ||
+        ide.name.toLowerCase().includes(cleanFilter) ||
+        ide.label.toLowerCase().includes(cleanFilter) ||
+        ide.id.toLowerCase().includes(cleanFilter)
+      );
+
+      if (filtered.length === 0) {
+        container.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: var(--cds-text-helper); padding: 24px;">No IDEs matching filter.</div>';
+        return;
+      }
+
+      container.innerHTML = filtered.map(ide =>
+        '<button type="button" class="btn-dashboard-ide' + (ide.primary ? ' primary' : '') + '" onclick="launchProjectIde(\'' + ide.id + '\')" title="' + escapeHtml(ide.name) + '">' +
+          '<span>' + escapeHtml(ide.name) + '</span>' +
+        '</button>'
+      ).join('');
+    }
+
+    function filterProjectIdes() {
+      const query = (document.getElementById('projectIdeSearchInput')?.value || '');
+      renderProjectIdeButtons(query);
+    }
+
+    async function launchProjectIde(ideId) {
+      if (!currentIdeProject) return;
+      const pName = currentIdeProject;
+      sileo.info('Launching ' + ideId + ' for [' + pName + ']...');
+      try {
+        const res = await fetch('/__hostmagic/api/projects/open-ide', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ide: ideId, name: pName })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          sileo.success(data.message || 'Opened project in ' + ideId + '!');
+          closeProjectIdeModal();
+        } else if (data.needPath) {
+          closeProjectIdeModal();
+          sileo.info('Project folder not linked yet. Select project directory...');
+          browseAndLinkProject(pName);
+        } else {
+          sileo.error('Could not open ' + ideId + ': ' + (data.error || data.message || 'Unknown error'));
+        }
+      } catch (err) {
+        sileo.error('Error launching IDE: ' + err.message);
+      }
+    }
+
     function openCustomizeModal(projectName) {
       currentCustomizingProject = projectName;
       const titleEl = document.getElementById('customizeProjectTitle');
@@ -1709,6 +2280,18 @@ export function getDefaultDashboardTemplate(): string {
       if (nameEl) nameEl.textContent = projectName;
 
       const p = allProjects.find(item => item.name.toLowerCase() === projectName.toLowerCase()) || {};
+      const isRunning = p.status === 'running';
+      const forgetBtn = document.getElementById('customizeForgetBtn');
+      if (forgetBtn) {
+        if (isRunning) {
+          forgetBtn.disabled = true;
+          forgetBtn.title = 'Stop project before removing from dashboard';
+        } else {
+          forgetBtn.disabled = false;
+          forgetBtn.title = 'Remove project from dashboard registry';
+        }
+      }
+
       const current = getProjectCustomization(projectName, p.icon, p.color);
       currentSelectedIcon = current.icon || 'box';
       currentSelectedColor = current.color || '';
@@ -1848,11 +2431,122 @@ export function getDefaultDashboardTemplate(): string {
       return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
     }
 
-    function showToast(msg) {
-      const toast = document.getElementById('toast');
-      toast.textContent = msg;
-      toast.classList.add('show');
-      setTimeout(() => toast.classList.remove('show'), 3200);
+    // --- Sileo Notification Library ---
+    const sileo = (function() {
+      const ICONS = {
+        success: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>',
+        error: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>',
+        warning: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>',
+        info: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>'
+      };
+
+      function getToaster() {
+        let toaster = document.getElementById('sileo-toaster');
+        if (!toaster) {
+          toaster = document.createElement('div');
+          toaster.id = 'sileo-toaster';
+          document.body.appendChild(toaster);
+        }
+        return toaster;
+      }
+
+      function dismiss(toastEl) {
+        if (!toastEl || toastEl.classList.contains('sileo-dismissing')) return;
+        toastEl.classList.add('sileo-dismissing');
+        setTimeout(() => {
+          if (toastEl.parentNode) toastEl.parentNode.removeChild(toastEl);
+        }, 260);
+      }
+
+      function show(message, type = 'info', duration = 3400) {
+        const text = typeof message === 'object' && message ? (message.title || message.message || JSON.stringify(message)) : String(message || '');
+        const validTypes = ['success', 'error', 'warning', 'info'];
+        const toastType = validTypes.includes(type) ? type : 'info';
+        const toaster = getToaster();
+
+        const toast = document.createElement('div');
+        toast.className = 'sileo-toast ' + toastType;
+        
+        const iconCapsule = document.createElement('div');
+        iconCapsule.className = 'sileo-icon-capsule ' + toastType;
+        iconCapsule.innerHTML = ICONS[toastType];
+
+        const content = document.createElement('div');
+        content.className = 'sileo-content';
+        content.textContent = text;
+
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'sileo-close-btn';
+        closeBtn.title = 'Dismiss';
+        closeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+        closeBtn.onclick = (e) => {
+          e.stopPropagation();
+          dismiss(toast);
+        };
+
+        const progress = document.createElement('div');
+        progress.className = 'sileo-progress';
+        const progressBar = document.createElement('div');
+        progressBar.className = 'sileo-progress-bar';
+        progressBar.style.animationDuration = duration + 'ms';
+        progress.appendChild(progressBar);
+
+        toast.appendChild(iconCapsule);
+        toast.appendChild(content);
+        toast.appendChild(closeBtn);
+        toast.appendChild(progress);
+
+        toast.onclick = () => dismiss(toast);
+
+        toaster.appendChild(toast);
+
+        let timer = setTimeout(() => {
+          dismiss(toast);
+        }, duration);
+
+        toast.addEventListener('mouseenter', () => {
+          clearTimeout(timer);
+          progressBar.style.animationPlayState = 'paused';
+        });
+
+        toast.addEventListener('mouseleave', () => {
+          timer = setTimeout(() => dismiss(toast), 1500);
+          progressBar.style.animationPlayState = 'running';
+        });
+
+        return toast;
+      }
+
+      return {
+        show,
+        success: (msg, dur) => show(msg, 'success', dur || 3400),
+        error: (msg, dur) => show(msg, 'error', dur || 4500),
+        warning: (msg, dur) => show(msg, 'warning', dur || 3800),
+        info: (msg, dur) => show(msg, 'info', dur || 3400),
+        dismiss,
+        clear: () => {
+          const toaster = document.getElementById('sileo-toaster');
+          if (toaster) toaster.innerHTML = '';
+        }
+      };
+    })();
+
+    window.sileo = sileo;
+
+    function showToast(msg, type = 'info') {
+      if (typeof msg === 'string') {
+        const lower = msg.toLowerCase();
+        if (type === 'info') {
+          if (lower.includes('error') || lower.includes('failed') || lower.includes('fail')) {
+            type = 'error';
+          } else if (lower.includes('success') || lower.includes('started') || lower.includes('updated') || lower.includes('linked') || lower.includes('imported') || lower.includes('registered') || lower.includes('copied')) {
+            type = 'success';
+          } else if (lower.includes('warning') || lower.includes('no logs')) {
+            type = 'warning';
+          }
+        }
+      }
+      return sileo.show(msg, type);
     }
 
     function escapeHtml(str) {
@@ -1886,18 +2580,16 @@ export function getDefaultDashboardTemplate(): string {
             : '<span class="badge badge-status-stopped"><span class="status-dot-stopped"></span> STOPPED</span>';
 
           const mainActionBtn = isRunning
-            ? \`<button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); stopProject('\${escapeHtml(p.name)}')">
+            ? \`<button class="btn btn-secondary btn-sm" id="btn-restart-\${escapeHtml(p.name)}" onclick="event.stopPropagation(); restartProject('\${escapeHtml(p.name)}', '\${escapeHtml(p.path)}')" title="Restart project services">
+                \${Icons.restart} Restart
+              </button>
+              <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); stopProject('\${escapeHtml(p.name)}')">
                 \${Icons.stop} Stop
               </button>\`
             : \`<button class="btn btn-primary btn-sm" id="btn-play-\${escapeHtml(p.name)}" onclick="event.stopPropagation(); startProject('\${escapeHtml(p.name)}', '\${escapeHtml(p.path)}')">
                 \${Icons.play} Start
               </button>\`;
 
-          const forgetBtn = !isRunning
-            ? \`<button class="btn-action btn-action-delete" title="Remove from list" onclick="event.stopPropagation(); forgetProject('\${escapeHtml(p.name)}')">
-                \${Icons.trash} Forget
-              </button>\`
-            : '';
 
           const projectLogBtn = isRunning
             ? \`<button class="btn-action btn-action-logs" onclick="event.stopPropagation(); openLogModal('\${escapeHtml(p.name)}', 'all')">
@@ -1967,11 +2659,14 @@ export function getDefaultDashboardTemplate(): string {
                   }
                 </div>
                 <div class="project-actions" onclick="event.stopPropagation()">
-                  <button type="button" class="btn-action btn-action-edit" title="Customize icon & left border color" onclick="openCustomizeModal('\${escapeHtml(p.name)}')">
-                    \${Icons.sliders} Style
+                  <button type="button" class="btn-action" title="Open project in IDE or Terminal" onclick="openProjectIdeModal('\${escapeHtml(p.name)}')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+                    Open in...
+                  </button>
+                  <button type="button" class="btn-action btn-action-edit" title="Configure project appearance & settings" onclick="openCustomizeModal('\${escapeHtml(p.name)}')">
+                    \${Icons.sliders} Config
                   </button>
                   \${projectLogBtn}
-                  \${forgetBtn}
                   \${mainActionBtn}
                 </div>
               </div>
@@ -2107,12 +2802,12 @@ export function getDefaultDashboardTemplate(): string {
         });
         const data = await res.json();
         if (res.ok && data.success) {
-          showToast('Project [' + name + '] started successfully');
+          sileo.success('Project [' + name + '] started successfully');
         } else {
-          alert('Failed to start project: ' + (data.error || 'Unknown error'));
+          sileo.error('Failed to start project: ' + (data.error || 'Unknown error'));
         }
       } catch (err) {
-        alert('Error connecting to Hostmagic gateway: ' + err.message);
+        sileo.error('Error connecting to Hostmagic gateway: ' + err.message);
       } finally {
         actionInProgress = false;
         await loadDashboard();
@@ -2132,13 +2827,81 @@ export function getDefaultDashboardTemplate(): string {
         });
         const data = await res.json();
         if (res.ok && data.success) {
-          showToast('Project [' + name + '] stopped cleanly');
+          sileo.info('Project [' + name + '] stopped cleanly');
         } else {
-          alert('Failed to stop project: ' + (data.error || 'Unknown error'));
+          sileo.error('Failed to stop project: ' + (data.error || 'Unknown error'));
         }
       } catch (err) {
-        alert('Error communicating with Hostmagic gateway: ' + err.message);
+        sileo.error('Error communicating with Hostmagic gateway: ' + err.message);
       } finally {
+        actionInProgress = false;
+        await loadDashboard();
+      }
+    }
+
+    async function restartProject(name, path) {
+      if (!path) {
+        await browseAndLinkProject(name);
+        return;
+      }
+      const btn = document.getElementById('btn-restart-' + name);
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="icon spin"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5A10 10 0 0 1 18.8 4.2M22 12.5a10 10 0 0 1-18.8 4.2"></path></svg></span> Restarting...';
+      }
+      actionInProgress = true;
+      try {
+        const res = await fetch('/__hostmagic/api/projects/restart', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, path })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          sileo.success('Project [' + name + '] restarted successfully');
+        } else {
+          sileo.error('Failed to restart project: ' + (data.error || 'Unknown error'));
+        }
+      } catch (err) {
+        sileo.error('Error restarting project: ' + err.message);
+      } finally {
+        actionInProgress = false;
+        await loadDashboard();
+      }
+    }
+
+    async function restartFromMasthead() {
+      const running = allProjects.filter(p => p.status === 'running');
+      if (running.length === 0) {
+        sileo.info('No projects are currently running to restart.');
+        await loadDashboard(true);
+        return;
+      }
+      const btn = document.getElementById('btnRestartMasthead');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="icon spin"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5A10 10 0 0 1 18.8 4.2M22 12.5a10 10 0 0 1-18.8 4.2"></path></svg></span> <span>Restarting...</span>';
+      }
+      actionInProgress = true;
+      try {
+        const res = await fetch('/__hostmagic/api/projects/restart', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          sileo.success('Restarted ' + (data.restarted?.length || running.length) + ' running project(s)');
+        } else {
+          sileo.error('Failed to restart projects: ' + (data.error || 'Unknown error'));
+        }
+      } catch (err) {
+        sileo.error('Error restarting projects: ' + err.message);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5A10 10 0 0 1 18.8 4.2M22 12.5a10 10 0 0 1-18.8 4.2"></path></svg></span> <span>Restart</span>';
+        }
         actionInProgress = false;
         await loadDashboard();
       }
@@ -2148,6 +2911,7 @@ export function getDefaultDashboardTemplate(): string {
       if (!confirm('Remove project [' + name + '] from Hostmagic dashboard registry? (Files on disk will remain untouched)')) {
         return;
       }
+      closeCustomizeModal();
       try {
         const res = await fetch('/__hostmagic/api/projects', {
           method: 'DELETE',
@@ -2155,14 +2919,19 @@ export function getDefaultDashboardTemplate(): string {
           body: JSON.stringify({ name })
         });
         if (res.ok) {
-          showToast('Project [' + name + '] removed');
+          sileo.info('Project [' + name + '] removed');
           await loadDashboard();
         } else {
-          alert('Failed to remove project.');
+          sileo.error('Failed to remove project.');
         }
       } catch (err) {
-        alert('Error removing project: ' + err.message);
+        sileo.error('Error removing project: ' + err.message);
       }
+    }
+
+    async function forgetCurrentProject() {
+      if (!currentCustomizingProject) return;
+      await forgetProject(currentCustomizingProject);
     }
 
     // --- Modal Logs ---
@@ -2303,7 +3072,7 @@ export function getDefaultDashboardTemplate(): string {
           });
           const importData = await importRes.json();
           if (importRes.ok && importData.success) {
-            showToast('Project [' + name + '] linked to ' + data.path);
+            sileo.success('Project [' + name + '] linked to ' + data.path);
             await loadDashboard();
           } else {
             openAddProjectModal();
@@ -2315,14 +3084,14 @@ export function getDefaultDashboardTemplate(): string {
           }
         }
       } catch (err) {
-        alert('Error picking folder: ' + err.message);
+        sileo.error('Error picking folder: ' + err.message);
       }
     }
 
     async function submitNewProject() {
       const pPath = document.getElementById('projectFolderPath').value.trim();
       if (!pPath) {
-        alert('Please enter a project directory path.');
+        sileo.warning('Please enter a project directory path.');
         return;
       }
       try {
@@ -2334,14 +3103,14 @@ export function getDefaultDashboardTemplate(): string {
         const data = await res.json();
         if (res.ok && data.success) {
           closeAddProjectModal();
-          showToast('Project [' + (data.project?.name || 'project') + '] imported');
+          sileo.success('Project [' + (data.project?.name || 'project') + '] imported');
           document.getElementById('projectFolderPath').value = '';
           await loadDashboard();
         } else {
-          alert(data.error || 'Failed to import project. Make sure .hostmagic.json exists in that directory.');
+          sileo.error(data.error || 'Failed to import project. Make sure .hostmagic.json exists in that directory.');
         }
       } catch (err) {
-        alert('Error connecting to Hostmagic gateway: ' + err.message);
+        sileo.error('Error connecting to Hostmagic gateway: ' + err.message);
       }
     }
 
@@ -2368,7 +3137,7 @@ export function getDefaultDashboardTemplate(): string {
       const type = document.getElementById('addType').value;
 
       if (!domain || isNaN(port) || port <= 0) {
-        alert('Please enter a valid domain and internal port.');
+        sileo.warning('Please enter a valid domain and internal port.');
         return;
       }
 
@@ -2387,15 +3156,15 @@ export function getDefaultDashboardTemplate(): string {
 
         if (res.ok) {
           closeAddModal();
-          showToast('Domain ' + domain + ' registered');
+          sileo.success('Domain ' + domain + ' registered');
           document.getElementById('addDomain').value = '';
           document.getElementById('addPort').value = '';
           await loadDashboard();
         } else {
-          alert('Failed to register domain.');
+          sileo.error('Failed to register domain.');
         }
       } catch (err) {
-        alert('Error connecting to Hostmagic gateway.');
+        sileo.error('Error connecting to Hostmagic gateway.');
       }
     }
 
@@ -2410,11 +3179,11 @@ export function getDefaultDashboardTemplate(): string {
           body: JSON.stringify({ domain })
         });
         if (res.ok) {
-          showToast('Domain ' + domain + ' removed');
+          sileo.info('Domain ' + domain + ' removed');
           await loadDashboard();
         }
       } catch (err) {
-        alert('Error deleting route.');
+        sileo.error('Error deleting route.');
       }
     }
 
@@ -2427,6 +3196,56 @@ export function getDefaultDashboardTemplate(): string {
         loadDashboard(false);
       }
     }, 2500);
+
+    // Progressive Web App (PWA) Support
+    let deferredPwaPrompt = null;
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/__hostmagic/sw.js', { scope: '/' })
+          .then((reg) => {
+            console.log('[Hostmagic PWA] Service Worker registered with scope:', reg.scope);
+          })
+          .catch((err) => {
+            console.warn('[Hostmagic PWA] Service Worker registration failed:', err);
+          });
+      });
+    }
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPwaPrompt = e;
+      const installBtn = document.getElementById('pwaInstallBtn');
+      if (installBtn) {
+        installBtn.style.display = 'inline-flex';
+      }
+    });
+
+    window.addEventListener('appinstalled', () => {
+      deferredPwaPrompt = null;
+      const installBtn = document.getElementById('pwaInstallBtn');
+      if (installBtn) {
+        installBtn.style.display = 'none';
+      }
+      if (typeof sileo !== 'undefined' && sileo.success) {
+        sileo.success('Hostmagic PWA installed successfully!');
+      }
+    });
+
+    async function installPwaApp() {
+      if (!deferredPwaPrompt) return;
+      deferredPwaPrompt.prompt();
+      try {
+        const choice = await deferredPwaPrompt.userChoice;
+        if (choice && choice.outcome === 'accepted') {
+          const installBtn = document.getElementById('pwaInstallBtn');
+          if (installBtn) installBtn.style.display = 'none';
+        }
+      } catch (err) {
+        console.warn('[Hostmagic PWA] Prompt outcome error:', err);
+      }
+      deferredPwaPrompt = null;
+    }
   </script>
 </body>
 </html>`;

@@ -12,6 +12,11 @@ interface RunningProcess {
   pid?: number;
 }
 
+export interface ProcessManagerOptions {
+  quiet?: boolean;
+  handleSignals?: boolean;
+}
+
 export class ProcessManager {
   private processes: RunningProcess[] = [];
   private isShuttingDown = false;
@@ -19,9 +24,21 @@ export class ProcessManager {
   private gatewayPort?: number;
   private queuedGatewayLogs: Array<{ target: string; line: string }> = [];
   private gatewayFlushTimer?: NodeJS.Timeout;
+  private quiet = false;
 
-  constructor() {
-    this.setupSignalHandlers();
+  constructor(options?: ProcessManagerOptions) {
+    this.quiet = !!options?.quiet;
+    if (options?.handleSignals !== false) {
+      this.setupSignalHandlers();
+    }
+  }
+
+  public setQuiet(quiet: boolean): void {
+    this.quiet = quiet;
+  }
+
+  public isQuiet(): boolean {
+    return this.quiet;
   }
 
   public setGatewayPort(port: number): void {
@@ -117,7 +134,9 @@ export class ProcessManager {
     const handleLine = (rawLine: string) => {
       const line = rawLine.replace(/[\r\n]+$/, '');
       if (line.trim().length > 0 || line.length > 0) {
-        process.stdout.write(`${prefix} ${line}\n`);
+        if (!this.quiet) {
+          process.stdout.write(`${prefix} ${line}\n`);
+        }
         if (serviceName) ReverseProxyServer.appendLog(serviceName, line);
         if (domain) ReverseProxyServer.appendLog(domain, line);
         if (this.gatewayPort) {
