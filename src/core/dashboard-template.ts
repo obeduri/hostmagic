@@ -2235,7 +2235,7 @@ export function getDefaultDashboardTemplate(): string {
       }
 
       container.innerHTML = filtered.map(ide =>
-        '<button type="button" class="btn-dashboard-ide' + (ide.primary ? ' primary' : '') + '" onclick="launchProjectIde(\'' + ide.id + '\')" title="' + escapeHtml(ide.name) + '">' +
+        '<button type="button" class="btn-dashboard-ide' + (ide.primary ? ' primary' : '') + '" data-ide="' + escapeHtml(ide.id) + '" onclick="launchProjectIde(this.dataset.ide)" title="' + escapeHtml(ide.name) + '">' +
           '<span>' + escapeHtml(ide.name) + '</span>' +
         '</button>'
       ).join('');
@@ -2560,6 +2560,7 @@ export function getDefaultDashboardTemplate(): string {
 
     function renderDashboard(projectsToRender, routesToRender) {
       const container = document.getElementById('projectsContainer');
+      if (!container) return;
       const search = (document.getElementById('searchInput')?.value || '').toLowerCase().trim();
 
       if (!projectsToRender || projectsToRender.length === 0) {
@@ -2765,14 +2766,17 @@ export function getDefaultDashboardTemplate(): string {
           }
           allProjects = Array.from(dedupMap.values());
           const runningCount = allProjects.filter(p => p.status === 'running').length;
-          document.getElementById('metricRunningProjects').textContent = runningCount;
-          document.getElementById('metricTotalProjects').textContent = ' / ' + allProjects.length + ' total';
+          const runningEl = document.getElementById('metricRunningProjects');
+          if (runningEl) runningEl.textContent = runningCount;
+          const totalEl = document.getElementById('metricTotalProjects');
+          if (totalEl) totalEl.textContent = ' / ' + allProjects.length + ' total';
         }
 
         if (statusRes.ok) {
           const statusData = await statusRes.json();
           allRoutes = statusData.routes || [];
-          document.getElementById('metricDomains').textContent = allRoutes.length;
+          const domainsEl = document.getElementById('metricDomains');
+          if (domainsEl) domainsEl.textContent = allRoutes.length;
         }
 
         filterDashboard();
@@ -2936,13 +2940,15 @@ export function getDefaultDashboardTemplate(): string {
 
     // --- Modal Logs ---
     const logModal = document.getElementById('logModal');
-    logModal.addEventListener('close', () => {
-      if (logInterval) {
-        clearInterval(logInterval);
-        logInterval = null;
-      }
-      activeLogTarget = null;
-    });
+    if (logModal) {
+      logModal.addEventListener('close', () => {
+        if (logInterval) {
+          clearInterval(logInterval);
+          logInterval = null;
+        }
+        activeLogTarget = null;
+      });
+    }
 
     function openLogModal(target, serviceName) {
       activeLogTarget = target;
