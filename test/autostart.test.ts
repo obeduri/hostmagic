@@ -95,8 +95,11 @@ try {
   assert.strictEqual(disableProjData.autostart, false);
 
   console.log('Test 9: gateway.autoStartProjects() executes cleanly');
+  const origStart = gateway.startProjectByNameOrPath.bind(gateway);
+  gateway.startProjectByNameOrPath = async (name: string) => ({ success: true, project: name });
   const autoStarted = await gateway.autoStartProjects();
   assert.ok(Array.isArray(autoStarted));
+  gateway.startProjectByNameOrPath = origStart;
 
   console.log('✅ All Hostmagic OS Autostart & Project Autostart tests passed successfully!');
 } finally {
