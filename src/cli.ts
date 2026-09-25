@@ -1,3 +1,4 @@
+import './core/url-patch.js';
 import { Command } from 'commander';
 import { initCommand } from './commands/init.js';
 import { runCommand } from './commands/run.js';
