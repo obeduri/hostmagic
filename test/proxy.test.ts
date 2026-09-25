@@ -16,6 +16,26 @@ const frontServer = http.createServer((req, res) => {
     res.end();
     return;
   }
+  if (req.url?.startsWith('/api/auth/check-headers')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        origin: req.headers.origin,
+        referer: req.headers.referer,
+        forwardedHost: req.headers['x-forwarded-host'],
+        cookie: req.headers.cookie,
+      })
+    );
+    return;
+  }
+  if (req.url?.startsWith('/api/auth/redirect-test')) {
+    res.writeHead(302, {
+      Location: 'http://localhost:3000/api/auth/signin',
+      'Set-Cookie': '__Secure-next-auth.session-token=secure123; Path=/; Secure; Domain=localhost',
+    });
+    res.end();
+    return;
+  }
   if (req.url?.startsWith('/api/auth/callback/google')) {
     res.writeHead(302, {
       Location: '/user-dashboard',
@@ -227,6 +247,54 @@ try {
     res12b.headers.get('location'),
     'http://myapp.test/api/auth/callback/github?code=gh-code-123'
   );
+
+  // Test 12c: Auth CSRF & Origin masking to localhost:3000
+  console.log('Test 12c: Auth endpoints normalize Origin, Referer and x-forwarded-host to localhost:3000');
+  const res12c = await fetch(`http://127.0.0.1:${proxyPort}/api/auth/check-headers`, {
+    headers: {
+      Host: 'myapp.test',
+      Origin: 'http://myapp.test',
+      Referer: 'http://myapp.test/login',
+      Cookie: 'next-auth.session-token=my-token-123',
+    },
+  });
+  assert.strictEqual(res12c.status, 200);
+  const data12c = (await res12c.json()) as any;
+  assert.strictEqual(data12c.forwardedHost, `localhost:${oauthBridgePort}`);
+  assert.strictEqual(data12c.origin, `http://localhost:${oauthBridgePort}`);
+  assert.strictEqual(data12c.referer, `http://localhost:${oauthBridgePort}/login`);
+  assert.ok(data12c.cookie.includes('next-auth.session-token=my-token-123'));
+  assert.ok(data12c.cookie.includes('__Secure-next-auth.session-token=my-token-123'));
+
+  // Test 12d: Local bridge redirect rewriting and cookie prefix stripping
+  console.log('Test 12d: Local bridge redirect rewritten to .test domain and strips __Secure- prefix');
+  const res12d = await fetch(`http://127.0.0.1:${proxyPort}/api/auth/redirect-test`, {
+    headers: { Host: 'myapp.test' },
+    redirect: 'manual',
+  });
+  assert.strictEqual(res12d.status, 302);
+  assert.strictEqual(res12d.headers.get('location'), 'http://myapp.test/api/auth/signin');
+  const cookie12d = res12d.headers.get('set-cookie') || '';
+  assert.ok(cookie12d.includes('next-auth.session-token=secure123'));
+  assert.ok(!cookie12d.includes('__Secure-'));
+  assert.ok(!cookie12d.includes('Domain=localhost'));
+
+  // Test 12e: Cookie transfer and hash preservation on auxiliary bridge port
+  console.log('Test 12e: Cookie transfer and hash preservation on auxiliary bridge port');
+  const res12e = await fetch(`http://127.0.0.1:${oauthBridgePort}/api/auth/callback/google?code=code-abc`, {
+    headers: {
+      Host: 'localhost:3000',
+      Cookie: 'custom_oauth_state=xyz123',
+    },
+    redirect: 'manual',
+  });
+  assert.strictEqual(res12e.status, 302);
+  assert.strictEqual(res12e.headers.get('location'), 'http://myapp.test/api/auth/callback/google?code=code-abc');
+  const cookie12e = res12e.headers.get('set-cookie') || '';
+  assert.ok(cookie12e.includes('custom_oauth_state=xyz123'));
+  const html12e = await res12e.text();
+  assert.ok(html12e.includes('window.location.hash'));
+  assert.ok(html12e.includes('http://myapp.test/api/auth/callback/google?code=code-abc'));
 
   // Test 13: Intuitive localhost routing by Referer header & port parameter
   console.log('Test 13: Intuitive localhost routing by Referer & port parameter');

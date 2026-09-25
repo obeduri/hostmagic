@@ -61,11 +61,13 @@ export class ReverseProxyServer {
   private showProjectLogs = false;
   private activeLocalhostTarget?: string;
   private listeningPort = 80;
+  private oauthPort = 3000;
   private oauthStateCache: Map<
     string,
-    { domain: string; timestamp: number }
+    { domain: string; cookies?: string[]; timestamp: number }
   > = new Map();
   private lastOAuthDomain?: string;
+  private lastActiveDomain?: string;
   private lastActiveProject?: string;
 
   private static logBuffers: Map<string, string[]> = new Map();
@@ -192,96 +194,111 @@ export class ReverseProxyServer {
     // Universal OAuth 2.0 Authorization URL Rewriting:
     // If an authorization initiation redirect uses a .test or .local redirect_uri,
     // rewrite it to http://localhost:3000 for compatibility with providers that disallow custom HTTP TLDs,
-    // and remember the origin domain in oauthStateCache.
+    // and remember the origin domain and initiation cookies in oauthStateCache.
     this.proxy.on('proxyRes', (proxyRes, req) => {
       const rawHost = req.headers.host || '';
       const host = rawHost.split(':')[0].toLowerCase();
       const location = proxyRes.headers['location'];
 
       if (location) {
-        const isOAuthRedirect =
-          location.includes('redirect_uri=') ||
-          location.includes('/oauth') ||
-          location.includes('/authorize') ||
-          location.includes('/auth/');
+        const bridgePort = 3000;
+        const targetDomain =
+          (host && host !== 'localhost' && host !== '127.0.0.1' ? host : undefined) ||
+          this.lastOAuthDomain ||
+          this.lastActiveDomain ||
+          this.getDefaultProjectDomain();
 
-        if (isOAuthRedirect) {
-          if (host && (host.endsWith('.test') || host.endsWith('.local') || this.routes.has(host))) {
-            this.lastOAuthDomain = host;
+        // 1. Check if response is redirecting back to localhost:3000 (e.g. NextAuth callbackUrl, session redirect)
+        // Rewrite back to active .test domain so developer stays on their project domain!
+        let isLocalBridgeRedirect = false;
+        try {
+          const parsedLoc = new URL(location, `http://${rawHost}`);
+          if (
+            (parsedLoc.hostname === 'localhost' || parsedLoc.hostname === '127.0.0.1') &&
+            (parsedLoc.port === '3000' || (this.oauthPort && parsedLoc.port === String(this.oauthPort)) || !parsedLoc.port) &&
+            !parsedLoc.searchParams.has('client_id')
+          ) {
+            isLocalBridgeRedirect = true;
+            if (targetDomain) {
+              proxyRes.headers['location'] = `http://${targetDomain}${parsedLoc.pathname}${parsedLoc.search}${parsedLoc.hash}`;
+            }
           }
+        } catch {}
 
-          try {
-            const parsed = new URL(location);
-            const state = parsed.searchParams.get('state');
-            if (state && host) {
-              this.oauthStateCache.set(state, {
-                domain: host,
-                timestamp: Date.now(),
-              });
+        // 2. Outbound OAuth Authorization URL rewriting (e.g. Google, GitHub, Auth0)
+        if (!isLocalBridgeRedirect) {
+          const isOAuthRedirect =
+            location.includes('redirect_uri=') ||
+            ((location.includes('/oauth') || location.includes('/authorize') || location.includes('/auth/')) &&
+             !location.includes('localhost') &&
+             !location.includes('127.0.0.1'));
+
+          if (isOAuthRedirect) {
+            if (host && (host.endsWith('.test') || host.endsWith('.local') || this.routes.has(host))) {
+              this.lastOAuthDomain = host;
             }
 
-            const redirectUri = parsed.searchParams.get('redirect_uri');
-            if (redirectUri) {
-              let rewrittenUri = redirectUri;
-              try {
-                const parsedRedirect = new URL(redirectUri);
-                if (
-                  parsedRedirect.hostname.endsWith('.test') ||
-                  parsedRedirect.hostname.endsWith('.local') ||
-                  this.routes.has(parsedRedirect.hostname.toLowerCase())
-                ) {
-                  rewrittenUri = `http://localhost:3000${parsedRedirect.pathname}${parsedRedirect.search}${parsedRedirect.hash}`;
+            try {
+              const parsed = new URL(location);
+              const state = parsed.searchParams.get('state');
+              if (state && targetDomain) {
+                const rawSetCookie = proxyRes.headers['set-cookie'];
+                const cookies = rawSetCookie
+                  ? (Array.isArray(rawSetCookie) ? rawSetCookie : [rawSetCookie])
+                  : undefined;
+                this.oauthStateCache.set(state, {
+                  domain: targetDomain,
+                  cookies,
+                  timestamp: Date.now(),
+                });
+              }
+
+              const redirectUri = parsed.searchParams.get('redirect_uri');
+              if (redirectUri) {
+                let rewrittenUri = redirectUri;
+                try {
+                  const parsedRedirect = new URL(redirectUri);
+                  if (
+                    parsedRedirect.hostname.endsWith('.test') ||
+                    parsedRedirect.hostname.endsWith('.local') ||
+                    this.routes.has(parsedRedirect.hostname.toLowerCase())
+                  ) {
+                    rewrittenUri = `http://localhost:${bridgePort}${parsedRedirect.pathname}${parsedRedirect.search}${parsedRedirect.hash}`;
+                  }
+                } catch {
+                  rewrittenUri = redirectUri.replace(
+                    /https?:\/\/[^/]+\.(test|local)/gi,
+                    `http://localhost:${bridgePort}`
+                  );
                 }
-              } catch {
-                rewrittenUri = redirectUri.replace(
-                  /http:\/\/[^/]+\.(test|local)/g,
-                  'http://localhost:3000'
+
+                if (rewrittenUri !== redirectUri) {
+                  parsed.searchParams.set('redirect_uri', rewrittenUri);
+                  proxyRes.headers['location'] = parsed.toString();
+                }
+              }
+            } catch {
+              if (location.includes('.test') || location.includes('.local')) {
+                proxyRes.headers['location'] = location.replace(
+                  /https?%3A%2F%2F[^%]+?\.(test|local)/gi,
+                  `http%3A%2F%2Flocalhost%3A${bridgePort}`
                 );
               }
-
-              if (rewrittenUri !== redirectUri) {
-                parsed.searchParams.set('redirect_uri', rewrittenUri);
-                proxyRes.headers['location'] = parsed.toString();
-              }
-            }
-          } catch {
-            if (location.includes('.test') || location.includes('.local')) {
-              proxyRes.headers['location'] = location.replace(
-                /http%3A%2F%2F[^%]+?\.(test|local)/gi,
-                'http%3A%2F%2Flocalhost%3A3000'
-              );
             }
           }
-        } else {
-          // If response redirects to localhost:3000 (e.g. NextAuth redirecting to callbackUrl),
-          // rewrite back to the active project domain so developer stays on their .test domain!
-          try {
-            const parsedLoc = new URL(location);
-            if (
-              (parsedLoc.hostname === 'localhost' || parsedLoc.hostname === '127.0.0.1') &&
-              parsedLoc.port === '3000' &&
-              !parsedLoc.searchParams.has('client_id')
-            ) {
-              const targetDomain =
-                (host && host !== 'localhost' && host !== '127.0.0.1' ? host : undefined) ||
-                this.lastOAuthDomain ||
-                this.getDefaultProjectDomain();
-              if (targetDomain) {
-                proxyRes.headers['location'] = `http://${targetDomain}${parsedLoc.pathname}${parsedLoc.search}${parsedLoc.hash}`;
-              }
-            }
-          } catch {}
         }
       }
 
       // Sanitize cookies for local development:
       // Remove '; Domain=localhost' or '; Domain=127.0.0.1' so cookie binds to current origin
       // Remove '; Secure' so cookie works over local HTTP
+      // Strip '__Secure-' and '__Host-' prefixes because browsers discard prefixed cookies over plain HTTP
       const rawSetCookie = proxyRes.headers['set-cookie'];
       if (rawSetCookie) {
         const cookies = (Array.isArray(rawSetCookie) ? rawSetCookie : [rawSetCookie]).map((c) =>
           c.replace(/;\s*domain=(localhost|127\.0\.0\.1)/gi, '')
            .replace(/;\s*secure/gi, '')
+           .replace(/^(__Secure-|__Host-)/i, '')
         );
         proxyRes.headers['set-cookie'] = cookies;
       }
@@ -351,11 +368,68 @@ export class ReverseProxyServer {
     const targetDomain = this.resolveTargetDomain(req);
     if (targetDomain) {
       const statusCode = req.method === 'POST' ? 307 : 302;
-      res.writeHead(statusCode, {
-        Location: `http://${targetDomain}${req.url || '/'}`,
+      const targetUrl = `http://${targetDomain}${req.url || '/'}`;
+
+      const headers: Record<string, any> = {
+        Location: targetUrl,
         'Cache-Control': 'no-store, no-cache, must-revalidate',
-      });
-      res.end();
+        'Content-Type': 'text/html; charset=utf-8',
+      };
+
+      // Transfer any cookies associated with OAuth state or present on localhost
+      const setCookies: string[] = [];
+      try {
+        const parsedUrl = new URL(req.url || '/', 'http://localhost');
+        const state = parsedUrl.searchParams.get('state');
+        if (state && this.oauthStateCache.has(state)) {
+          const cached = this.oauthStateCache.get(state);
+          if (cached?.cookies) {
+            for (const c of cached.cookies) {
+              const clean = c
+                .replace(/;\s*domain=[^;]+/gi, '')
+                .replace(/;\s*secure/gi, '')
+                .replace(/^(__Secure-|__Host-)/i, '');
+              setCookies.push(clean);
+            }
+          }
+        }
+      } catch {}
+
+      const cookieHeader = req.headers.cookie || '';
+      if (cookieHeader) {
+        const parts = cookieHeader.split(';');
+        for (const part of parts) {
+          const trimmed = part.trim();
+          if (trimmed && !trimmed.startsWith('hostmagic_target=')) {
+            const cleanNameVal = trimmed.replace(/^(__Secure-|__Host-)/i, '');
+            setCookies.push(`${cleanNameVal}; Path=/; SameSite=Lax`);
+          }
+        }
+      }
+
+      if (setCookies.length > 0) {
+        headers['Set-Cookie'] = setCookies;
+      }
+
+      res.writeHead(statusCode, headers);
+      res.end(`<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>OAuth Bridge Redirect</title>
+    <script>
+      var target = ${JSON.stringify(targetUrl)};
+      if (window.location.hash) {
+        window.location.replace(target + window.location.hash);
+      } else {
+        window.location.replace(target);
+      }
+    </script>
+  </head>
+  <body>
+    <p>Redirecting to ${targetDomain}...</p>
+  </body>
+</html>`);
       return;
     }
 
@@ -377,15 +451,18 @@ export class ReverseProxyServer {
       host.startsWith('hostmagic.settings:') ||
       host.startsWith('settings.hostmagic:');
 
-    // Track active OAuth origin when auth initiation request arrives on a project domain
-    if (url.includes('/api/auth') || url.includes('/auth/')) {
-      if (host && host !== 'localhost' && host !== '127.0.0.1' && !isSettingsHost) {
+    // Track active domain when developer visits any registered project domain
+    if (host && host !== 'localhost' && host !== '127.0.0.1' && !isSettingsHost) {
+      if (this.routes.has(host)) {
+        this.lastActiveDomain = host;
+      }
+      if (url.includes('/api/auth') || url.includes('/auth/') || url.includes('/login') || url.includes('/signin')) {
         this.lastOAuthDomain = host;
-        for (const [pName, p] of this.projects.entries()) {
-          if (p.routes.some((r) => r.domain === host)) {
-            this.lastActiveProject = pName;
-            break;
-          }
+      }
+      for (const [pName, p] of this.projects.entries()) {
+        if (p.routes.some((r) => r.domain === host)) {
+          this.lastActiveProject = pName;
+          break;
         }
       }
     }
@@ -502,7 +579,7 @@ export class ReverseProxyServer {
         res.end(
           JSON.stringify({
             hostmagic: true,
-            version: '1.1.3',
+            version: '1.1.4',
             projects: Array.from(this.projects.values()),
             routes: allRoutes,
           })
@@ -956,7 +1033,7 @@ export class ReverseProxyServer {
         res.end(
           JSON.stringify({
             hostmagic: true,
-            version: '1.1.3',
+            version: '1.1.4',
             projects: Array.from(this.projects.values()),
           })
         );
@@ -1037,11 +1114,66 @@ export class ReverseProxyServer {
         const targetDomain = this.resolveTargetDomain(req);
         if (targetDomain) {
           const statusCode = req.method === 'POST' ? 307 : 302;
-          res.writeHead(statusCode, {
-            Location: `http://${targetDomain}${url}`,
+          const targetUrl = `http://${targetDomain}${url}`;
+          const headers: Record<string, any> = {
+            Location: targetUrl,
             'Cache-Control': 'no-store, no-cache, must-revalidate',
-          });
-          res.end();
+            'Content-Type': 'text/html; charset=utf-8',
+          };
+
+          const setCookies: string[] = [];
+          try {
+            const parsedUrl = new URL(url, 'http://localhost');
+            const state = parsedUrl.searchParams.get('state');
+            if (state && this.oauthStateCache.has(state)) {
+              const cached = this.oauthStateCache.get(state);
+              if (cached?.cookies) {
+                for (const c of cached.cookies) {
+                  const clean = c
+                    .replace(/;\s*domain=[^;]+/gi, '')
+                    .replace(/;\s*secure/gi, '')
+                    .replace(/^(__Secure-|__Host-)/i, '');
+                  setCookies.push(clean);
+                }
+              }
+            }
+          } catch {}
+
+          const cookieHeader = req.headers.cookie || '';
+          if (cookieHeader) {
+            const parts = cookieHeader.split(';');
+            for (const part of parts) {
+              const trimmed = part.trim();
+              if (trimmed && !trimmed.startsWith('hostmagic_target=')) {
+                const cleanNameVal = trimmed.replace(/^(__Secure-|__Host-)/i, '');
+                setCookies.push(`${cleanNameVal}; Path=/; SameSite=Lax`);
+              }
+            }
+          }
+
+          if (setCookies.length > 0) {
+            headers['Set-Cookie'] = setCookies;
+          }
+
+          res.writeHead(statusCode, headers);
+          res.end(`<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>OAuth Bridge Redirect</title>
+    <script>
+      var target = ${JSON.stringify(targetUrl)};
+      if (window.location.hash) {
+        window.location.replace(target + window.location.hash);
+      } else {
+        window.location.replace(target);
+      }
+    </script>
+  </head>
+  <body>
+    <p>Redirecting to ${targetDomain}...</p>
+  </body>
+</html>`);
           return;
         }
       }
@@ -1061,7 +1193,8 @@ export class ReverseProxyServer {
     // 3. Domain-specific routing (e.g. abogando.test, api.abogando.test)
     const targetPort = this.routes.get(host);
     if (targetPort) {
-      // Automatically track the project the developer is actively browsing
+      // Automatically track the project and domain the developer is actively browsing
+      this.lastActiveDomain = host;
       for (const [pName, p] of this.projects.entries()) {
         if (p.routes.some((r) => r.domain === host)) {
           this.lastActiveProject = pName;
@@ -1069,28 +1202,51 @@ export class ReverseProxyServer {
         }
       }
 
-      // Zero-config OAuth: Mask all requests to auth/login endpoints through localhost:3000
+      // Zero-config OAuth: Mask all requests to auth endpoints through localhost:3000
       const isAuthRequest =
         url.startsWith('/api/auth') ||
         url.startsWith('/auth') ||
-        url === '/login' ||
-        url.startsWith('/login?') ||
-        url.startsWith('/signin');
+        url.includes('/api/auth/') ||
+        url.includes('/auth/callback') ||
+        url.includes('/auth/signin');
+
+      const bridgeHost = `localhost:${this.oauthPort || 3000}`;
 
       if (isAuthRequest) {
         this.lastOAuthDomain = host;
-        req.headers['x-forwarded-host'] = 'localhost:3000';
+        req.headers['x-forwarded-host'] = bridgeHost;
         req.headers['x-forwarded-proto'] = 'http';
-        req.headers['x-forwarded-port'] = '3000';
+        req.headers['x-forwarded-port'] = String(this.oauthPort || 3000);
+
+        // Mirror cookies so frameworks expecting __Secure- or standard names both find their cookies:
+        if (req.headers.cookie) {
+          const c = req.headers.cookie;
+          if (c.includes('next-auth.') && !c.includes('__Secure-next-auth.')) {
+            const secureEquivs = c
+              .split(';')
+              .map((p) => p.trim())
+              .filter((p) => p.startsWith('next-auth.'))
+              .map((p) => `__Secure-${p}`)
+              .join('; ');
+            if (secureEquivs) {
+              req.headers.cookie = `${c}; ${secureEquivs}`;
+            }
+          }
+        }
+
+        // Normalize Origin & Referer to match localhost bridge for CSRF validation:
+        if (req.headers.origin) {
+          req.headers.origin = `http://${bridgeHost}`;
+        }
+        if (req.headers.referer) {
+          req.headers.referer = req.headers.referer.replace(
+            /^https?:\/\/[^/]+/i,
+            `http://${bridgeHost}`
+          );
+        }
       }
 
       // Transparent HMR & Fast Refresh Support for Next.js, Vite, Turbopack, Astro, Remix:
-      // When dev servers (Next.js 14/15, Vite, Webpack, etc.) receive HMR requests
-      // (like /_next/webpack-hmr, /_next/hmr, dev polling, or dynamic chunks), they check the Origin & Referer headers.
-      // If Origin/Referer is http://my-app.test while the internal server is on localhost:PORT,
-      // dev servers block the request with cross-origin errors or disconnect the HMR WebSocket/SSE stream.
-      // By normalizing the Origin and Referer to match the internal target (for dev resources or same-origin requests),
-      // dev servers recognize the request as same-origin, guaranteeing 100% reliable Fast Refresh & Hot Reloading!
       const isDevResource =
         url.startsWith('/_next/') ||
         url.startsWith('/@vite') ||
@@ -1110,15 +1266,7 @@ export class ReverseProxyServer {
         url.includes('sockjs-node') ||
         url.includes('/ws');
 
-      const rawOrigin = req.headers.origin;
-      const isSameOriginToHost =
-        rawOrigin &&
-        (rawOrigin === `http://${host}` ||
-         rawOrigin === `https://${host}` ||
-         rawOrigin === `http://${rawHost}` ||
-         rawOrigin === `https://${rawHost}`);
-
-      if (isDevResource || isSameOriginToHost) {
+      if (isDevResource) {
         req.headers['x-forwarded-host'] = rawHost;
         req.headers['x-forwarded-proto'] = 'http';
         req.headers['x-forwarded-for'] = req.socket.remoteAddress || '127.0.0.1';
@@ -1131,6 +1279,10 @@ export class ReverseProxyServer {
             `http://127.0.0.1:${targetPort}`
           );
         }
+      } else if (!isAuthRequest) {
+        req.headers['x-forwarded-host'] = rawHost;
+        req.headers['x-forwarded-proto'] = 'http';
+        req.headers['x-forwarded-for'] = req.socket.remoteAddress || '127.0.0.1';
       }
 
       this.proxy.web(req, res, {
@@ -1678,6 +1830,11 @@ export class ReverseProxyServer {
       return this.lastOAuthDomain;
     }
 
+    // 2b. Intuit by most recently active domain visited by developer
+    if (this.lastActiveDomain && this.routes.has(this.lastActiveDomain.toLowerCase())) {
+      return this.lastActiveDomain;
+    }
+
     // 3. Intuit by explicitly selected project or cookie target
     const cookieHeader = req.headers.cookie || '';
     const match = cookieHeader.match(/hostmagic_target=([^;]+)/);
@@ -1690,6 +1847,8 @@ export class ReverseProxyServer {
           const route = p.routes.find((r) => r.targetPort === p.frontendPort);
           if (route) return route.domain;
         }
+        const frontTypeRoute = p.routes.find((r) => r.type === 'frontend');
+        if (frontTypeRoute) return frontTypeRoute.domain;
         if (p.routes.length > 0) return p.routes[0].domain;
       }
     }
@@ -1702,6 +1861,8 @@ export class ReverseProxyServer {
           const route = p.routes.find((r) => r.targetPort === p.frontendPort);
           if (route) return route.domain;
         }
+        const frontTypeRoute = p.routes.find((r) => r.type === 'frontend');
+        if (frontTypeRoute) return frontTypeRoute.domain;
         if (p.routes.length > 0) return p.routes[0].domain;
       }
     }
@@ -1715,6 +1876,15 @@ export class ReverseProxyServer {
     const referer = (req.headers.referer || '').toLowerCase();
     const origin = (req.headers.origin || '').toLowerCase();
 
+    const getPortForProject = (p?: ProjectRegistration): number | undefined => {
+      if (!p) return undefined;
+      if (p.frontendPort) return p.frontendPort;
+      const frontRoute = p.routes.find((r) => r.type === 'frontend');
+      if (frontRoute) return frontRoute.targetPort;
+      if (p.routes.length > 0) return p.routes[0].targetPort;
+      return undefined;
+    };
+
     // 0. Intuitive port or project query parameter (e.g. ?port=58993 or ?project=abogando)
     try {
       const parsedUrl = new URL(rawUrl, 'http://localhost');
@@ -1726,7 +1896,8 @@ export class ReverseProxyServer {
       }
       if (paramProj && this.projects.has(paramProj)) {
         const p = this.projects.get(paramProj);
-        if (p?.frontendPort) return p.frontendPort;
+        const pPort = getPortForProject(p);
+        if (pPort) return pPort;
       }
     } catch {
       // Ignored
@@ -1739,7 +1910,8 @@ export class ReverseProxyServer {
           (referer && referer.includes(route.domain.toLowerCase())) ||
           (origin && origin.includes(route.domain.toLowerCase()))
         ) {
-          if (project.frontendPort) return project.frontendPort;
+          const pPort = getPortForProject(project);
+          if (pPort) return pPort;
         }
       }
     }
@@ -1753,7 +1925,8 @@ export class ReverseProxyServer {
               (r) => r.domain.toLowerCase() === this.lastOAuthDomain?.toLowerCase()
             )
           ) {
-            if (project.frontendPort) return project.frontendPort;
+            const pPort = getPortForProject(project);
+            if (pPort) return pPort;
           }
         }
       }
@@ -1766,25 +1939,29 @@ export class ReverseProxyServer {
 
     if (cookieTarget && this.projects.has(cookieTarget)) {
       const p = this.projects.get(cookieTarget);
-      if (p?.frontendPort) return p.frontendPort;
+      const pPort = getPortForProject(p);
+      if (pPort) return pPort;
     }
 
     // 4. Check explicitly selected in-memory target
     if (this.activeLocalhostTarget && this.projects.has(this.activeLocalhostTarget)) {
       const p = this.projects.get(this.activeLocalhostTarget);
-      if (p?.frontendPort) return p.frontendPort;
+      const pPort = getPortForProject(p);
+      if (pPort) return pPort;
     }
 
     // 5. Intuit by most recently active project (the one the developer was browsing in tabs)
     if (this.lastActiveProject && this.projects.has(this.lastActiveProject)) {
       const p = this.projects.get(this.lastActiveProject);
-      if (p?.frontendPort) return p.frontendPort;
+      const pPort = getPortForProject(p);
+      if (pPort) return pPort;
     }
 
-    // 6. If exactly 1 project is running with a frontend
-    const activeProjects = Array.from(this.projects.values()).filter((p) => !!p.frontendPort);
-    if (activeProjects.length === 1) {
-      return activeProjects[0].frontendPort;
+    // 6. If exactly 1 project is running
+    const projectList = Array.from(this.projects.values());
+    if (projectList.length === 1) {
+      const pPort = getPortForProject(projectList[0]);
+      if (pPort) return pPort;
     }
 
     return undefined;
@@ -1795,10 +1972,13 @@ export class ReverseProxyServer {
       if (p.frontendPort) {
         const frontendRoute = p.routes.find((r) => r.targetPort === p.frontendPort);
         if (frontendRoute) return frontendRoute.domain;
-        if (p.routes.length > 0) return p.routes[0].domain;
       }
+      const frontTypeRoute = p.routes.find((r) => r.type === 'frontend');
+      if (frontTypeRoute) return frontTypeRoute.domain;
+      if (p.routes.length > 0) return p.routes[0].domain;
     }
-    return undefined;
+    const firstDomain = this.routes.keys().next().value;
+    return firstDomain || undefined;
   }
 
   private readJsonBody(req: http.IncomingMessage): Promise<any> {
@@ -2601,6 +2781,7 @@ export class ReverseProxyServer {
 
   public async start(port: number = 80, oauthPort: number = 3000): Promise<void> {
     this.listeningPort = port;
+    this.oauthPort = oauthPort;
 
     // 1. Start primary reverse proxy (default: port 80)
     await new Promise<void>((resolve, reject) => {
