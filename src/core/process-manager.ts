@@ -170,9 +170,17 @@ export class ProcessManager {
   ): Promise<void> {
     const prefix = this.getPrefix(info.service.type, info.service.name);
 
+    // Clean environment: Do not leak parent shell database connection strings into project services
+    const cleanParentEnv = { ...process.env };
+    if (!info.env?.DATABASE_URL) {
+      delete cleanParentEnv.DATABASE_URL;
+      delete cleanParentEnv.DIRECT_URL;
+      delete cleanParentEnv.SHADOW_DATABASE_URL;
+    }
+
     // Merge process environment with custom injected variables
     const mergedEnv: NodeJS.ProcessEnv = {
-      ...process.env,
+      ...cleanParentEnv,
       ...info.env,
     };
 

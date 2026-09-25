@@ -576,7 +576,7 @@ You can use either `hostmagic` or the shorthand **`hm`** alias interchangeably:
 | `hm clean` | `hostmagic clean` | Remove Hostmagic domain entries from system `hosts` for current project. |
 | | `-a, --all` | Remove Hostmagic entries across **all** projects. |
 | | `-y, --yes` | Skip interactive confirmation warning prompt. |
-| `hm --version` | `hm -V` | Display currently installed version of Hostmagic (e.g. `1.1.4`). |
+| `hm --version` | `hm -V` | Display currently installed version of Hostmagic (e.g. `1.1.5`). |
 | `hm --help` | `hm -h` | Display CLI help menu and list of available options. |
 
 ---
