@@ -183,7 +183,7 @@ export class ReverseProxyServer {
     this.showProjectLogs = Boolean(options?.showProjectLogs);
     this.proxy = httpProxy.createProxyServer({
       changeOrigin: true,
-      xfwd: true,
+      xfwd: false,
       ws: true,
     });
 
@@ -261,15 +261,15 @@ export class ReverseProxyServer {
                   if (
                     parsedRedirect.hostname.endsWith('.test') ||
                     parsedRedirect.hostname.endsWith('.local') ||
-                    this.routes.has(parsedRedirect.hostname.toLowerCase())
+                    this.routes.has(parsedRedirect.hostname.toLowerCase()) ||
+                    ((parsedRedirect.hostname === 'localhost' || parsedRedirect.hostname === '127.0.0.1') && parsedRedirect.protocol === 'https:')
                   ) {
                     rewrittenUri = `http://localhost:${bridgePort}${parsedRedirect.pathname}${parsedRedirect.search}${parsedRedirect.hash}`;
                   }
                 } catch {
-                  rewrittenUri = redirectUri.replace(
-                    /https?:\/\/[^/]+\.(test|local)/gi,
-                    `http://localhost:${bridgePort}`
-                  );
+                  rewrittenUri = redirectUri
+                    .replace(/https?:\/\/[^/]+\.(test|local)/gi, `http://localhost:${bridgePort}`)
+                    .replace(/https:\/\/localhost(:\d+)?/gi, `http://localhost:${bridgePort}`);
                 }
 
                 if (rewrittenUri !== redirectUri) {
@@ -278,11 +278,16 @@ export class ReverseProxyServer {
                 }
               }
             } catch {
-              if (location.includes('.test') || location.includes('.local')) {
-                proxyRes.headers['location'] = location.replace(
-                  /https?%3A%2F%2F[^%]+?\.(test|local)/gi,
-                  `http%3A%2F%2Flocalhost%3A${bridgePort}`
-                );
+              if (
+                location.includes('.test') ||
+                location.includes('.local') ||
+                location.includes('https%3A%2F%2Flocalhost') ||
+                location.includes('https://localhost')
+              ) {
+                proxyRes.headers['location'] = location
+                  .replace(/https?%3A%2F%2F[^%]+?\.(test|local)/gi, `http%3A%2F%2Flocalhost%3A${bridgePort}`)
+                  .replace(/https(%3A%2F%2Flocalhost)/gi, 'http$1')
+                  .replace(/https:\/\/localhost/gi, 'http://localhost');
               }
             }
           }
@@ -299,6 +304,7 @@ export class ReverseProxyServer {
           c.replace(/;\s*domain=(localhost|127\.0\.0\.1)/gi, '')
            .replace(/;\s*secure/gi, '')
            .replace(/^(__Secure-|__Host-)/i, '')
+           .replace(/next-auth\.callback-url=https(%3A%2F%2Flocalhost)/gi, 'next-auth.callback-url=http$1')
         );
         proxyRes.headers['set-cookie'] = cookies;
       }
