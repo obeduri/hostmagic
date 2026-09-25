@@ -16,6 +16,22 @@ const frontServer = http.createServer((req, res) => {
     res.end();
     return;
   }
+  if (req.url?.startsWith('/api/auth/signin-json/google')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        url: 'https://accounts.google.com/o/oauth2/v2/auth?client_id=client123&redirect_uri=https%3A%2F%2Fmyapp.test%2Fapi%2Fauth%2Fcallback%2Fgoogle&response_type=code&state=json-state-456',
+      })
+    );
+    return;
+  }
+  if (req.url?.startsWith('/api/auth/signin-html/google')) {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(
+      '<html><body><form action="https://accounts.google.com/o/oauth2/v2/auth?client_id=client123&redirect_uri=https://myapp.test/api/auth/callback/google&state=html-state-789"></form></body></html>'
+    );
+    return;
+  }
   if (req.url?.startsWith('/api/auth/check-headers')) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(
@@ -204,9 +220,11 @@ try {
   assert.strictEqual(res10.status, 302);
   const rewrittenGoogleUrl = res10.headers.get('location') || '';
   assert.ok(
+    rewrittenGoogleUrl.includes(`redirect_uri=http%3A%2F%2Flocalhost%3A${oauthBridgePort}%2Fapi%2Fauth%2Fcallback%2Fgoogle`) ||
+    rewrittenGoogleUrl.includes(`redirect_uri=http://localhost:${oauthBridgePort}/api/auth/callback/google`) ||
     rewrittenGoogleUrl.includes('redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fapi%2Fauth%2Fcallback%2Fgoogle') ||
     rewrittenGoogleUrl.includes('redirect_uri=http://localhost:3000/api/auth/callback/google'),
-    `Google redirect_uri must be rewritten to localhost:3000, got: ${rewrittenGoogleUrl}`
+    `Google redirect_uri must be rewritten to localhost bridge, got: ${rewrittenGoogleUrl}`
   );
   assert.ok(!rewrittenGoogleUrl.includes('myapp.test'), 'Google redirect_uri must not contain .test domain');
 
@@ -294,7 +312,51 @@ try {
   assert.ok(cookie12e.includes('custom_oauth_state=xyz123'));
   const html12e = await res12e.text();
   assert.ok(html12e.includes('window.location.hash'));
-  assert.ok(html12e.includes('http://myapp.test/api/auth/callback/google?code=code-abc'));
+  // Test 12f: JSON OAuth Body Interception (NextAuth React signIn('google'))
+  console.log('Test 12f: JSON OAuth Body Interception rewrites redirect_uri to localhost:3000');
+  const res12f = await fetch(`http://127.0.0.1:${proxyPort}/api/auth/signin-json/google`, {
+    headers: {
+      Host: 'myapp.test',
+      Accept: 'application/json',
+      'X-Auth-Return-Redirect': '1',
+    },
+  });
+  assert.strictEqual(res12f.status, 200);
+  const data12f = (await res12f.json()) as any;
+  assert.ok(
+    data12f.url.includes(`redirect_uri=http%3A%2F%2Flocalhost%3A${oauthBridgePort}%2Fapi%2Fauth%2Fcallback%2Fgoogle`) ||
+    data12f.url.includes(`redirect_uri=http://localhost:${oauthBridgePort}/api/auth/callback/google`) ||
+    data12f.url.includes('redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fapi%2Fauth%2Fcallback%2Fgoogle') ||
+    data12f.url.includes('redirect_uri=http://localhost:3000/api/auth/callback/google'),
+    `JSON url redirect_uri must be rewritten to localhost bridge, got: ${data12f.url}`
+  );
+  assert.ok(!data12f.url.includes('myapp.test'), 'JSON url must NOT contain myapp.test in redirect_uri');
+
+  // Test 12g: State cached from JSON OAuth body correctly routes callback
+  console.log('Test 12g: State cached from JSON OAuth body correctly routes callback to .test domain');
+  const res12g = await fetch(`http://127.0.0.1:${oauthBridgePort}/api/auth/callback/google?code=code-from-google&state=json-state-456`, {
+    headers: { Host: 'localhost:3000' },
+    redirect: 'manual',
+  });
+  assert.strictEqual(res12g.status, 302);
+  assert.strictEqual(
+    res12g.headers.get('location'),
+    'http://myapp.test/api/auth/callback/google?code=code-from-google&state=json-state-456'
+  );
+
+  // Test 12h: HTML OAuth Form / Link Body Interception
+  console.log('Test 12h: HTML OAuth Body Interception rewrites redirect_uri to localhost:3000');
+  const res12h = await fetch(`http://127.0.0.1:${proxyPort}/api/auth/signin-html/google`, {
+    headers: { Host: 'myapp.test' },
+  });
+  assert.strictEqual(res12h.status, 200);
+  const html12h = await res12h.text();
+  assert.ok(
+    html12h.includes(`redirect_uri=http://localhost:${oauthBridgePort}/api/auth/callback/google`) ||
+    html12h.includes('redirect_uri=http://localhost:3000/api/auth/callback/google'),
+    `HTML body redirect_uri must be rewritten to localhost bridge, got: ${html12h}`
+  );
+  assert.ok(!html12h.includes('myapp.test'), 'HTML body must NOT contain myapp.test in redirect_uri');
 
   // Test 13: Intuitive localhost routing by Referer header & port parameter
   console.log('Test 13: Intuitive localhost routing by Referer & port parameter');

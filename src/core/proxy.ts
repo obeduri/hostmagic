@@ -1,4 +1,5 @@
 import http from 'node:http';
+import zlib from 'node:zlib';
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -191,23 +192,83 @@ export class ReverseProxyServer {
       this.registerProject(initialProject);
     }
 
-    // Universal OAuth 2.0 Authorization URL Rewriting:
-    // If an authorization initiation redirect uses a .test or .local redirect_uri,
-    // rewrite it to http://localhost:3000 for compatibility with providers that disallow custom HTTP TLDs,
+    // Universal OAuth 2.0 Authorization URL & Body Rewriting:
+    // If an authorization initiation response (302 redirect or 200 JSON/HTML) uses a .test or .local redirect_uri,
+    // rewrite it to http://localhost:3000 for compatibility with providers that disallow custom HTTP TLDs (e.g. Google),
     // and remember the origin domain and initiation cookies in oauthStateCache.
-    this.proxy.on('proxyRes', (proxyRes, req) => {
-      const rawHost = req.headers.host || '';
+    this.proxy.on('proxyRes', (proxyRes: any, req: any, res: any) => {
+      const rawHost = req?.headers?.host || '';
       const host = rawHost.split(':')[0].toLowerCase();
       const location = proxyRes.headers['location'];
+      const bridgePort = this.oauthPort || 3000;
+      const targetDomain =
+        (host && host !== 'localhost' && host !== '127.0.0.1' ? host : undefined) ||
+        this.lastOAuthDomain ||
+        this.lastActiveDomain ||
+        this.getDefaultProjectDomain();
+
+      // Universal OAuth rewrite helper: handles both percent-encoded and unencoded redirect_uri/callbackUrl parameters
+      const sanitizeOAuthString = (input: string): { output: string; modified: boolean; state?: string } => {
+        let modified = false;
+        let output = input;
+
+        // Extract any OAuth state parameter
+        const stateMatch =
+          output.match(/[?&]state=([^&"'\s\\]+)/i) ||
+          output.match(/%26state%3D([^&"'\s\\]+)/i) ||
+          output.match(/"state"\s*:\s*"([^"]+)"/i);
+        const state = stateMatch ? decodeURIComponent(stateMatch[1]) : undefined;
+
+        // 1. Rewrite URL-encoded redirect_uri / callbackUrl / redirect_url:
+        const encodedParamRegex = /([?&]|%26)(redirect_uri%3D|redirect_uri=|callbackUrl%3D|callbackUrl=|callback_url%3D|callback_url=|redirect_url%3D|redirect_url=)https?%3A%2F%2F[^%&"'\s\\]+?\.(?:test|local)(%2F[^&"'\s\\]*)?/gi;
+        if (encodedParamRegex.test(output)) {
+          output = output.replace(
+            encodedParamRegex,
+            (match, prefix, param, path) => {
+              modified = true;
+              return `${prefix}${param}http%3A%2F%2Flocalhost%3A${bridgePort}${path || ''}`;
+            }
+          );
+        }
+
+        // 2. Rewrite plain unencoded redirect_uri / callbackUrl / redirect_url:
+        const plainParamRegex = /([?&]|%26)(redirect_uri=|callbackUrl=|callback_url=|redirect_url=)https?:\/\/[^/&"'\s\\]+?\.(?:test|local)(\/[^&"'\s\\]*)?/gi;
+        if (plainParamRegex.test(output)) {
+          output = output.replace(
+            plainParamRegex,
+            (match, prefix, param, path) => {
+              modified = true;
+              return `${prefix}${param}http://localhost:${bridgePort}${path || ''}`;
+            }
+          );
+        }
+
+        // 3. Rewrite any explicit auth callback URLs in JSON or text (e.g. NextAuth providers endpoint or signin)
+        const callbackPlainRegex = /(https?:\/\/[^/&"'\s\\]+?\.(?:test|local))(\/api\/auth\/callback\/[a-zA-Z0-9_-]+)/gi;
+        if (callbackPlainRegex.test(output)) {
+          output = output.replace(
+            callbackPlainRegex,
+            (match, origin, path) => {
+              modified = true;
+              return `http://localhost:${bridgePort}${path}`;
+            }
+          );
+        }
+        const callbackEncodedRegex = /(https?%3A%2F%2F[^%&"'\s\\]+?\.(?:test|local))(%2Fapi%2Fauth%2Fcallback%2F[a-zA-Z0-9_-]+)/gi;
+        if (callbackEncodedRegex.test(output)) {
+          output = output.replace(
+            callbackEncodedRegex,
+            (match, origin, path) => {
+              modified = true;
+              return `http%3A%2F%2Flocalhost%3A${bridgePort}${path}`;
+            }
+          );
+        }
+
+        return { output, modified, state };
+      };
 
       if (location) {
-        const bridgePort = 3000;
-        const targetDomain =
-          (host && host !== 'localhost' && host !== '127.0.0.1' ? host : undefined) ||
-          this.lastOAuthDomain ||
-          this.lastActiveDomain ||
-          this.getDefaultProjectDomain();
-
         // 1. Check if response is redirecting back to localhost:3000 (e.g. NextAuth callbackUrl, session redirect)
         // Rewrite back to active .test domain so developer stays on their project domain!
         let isLocalBridgeRedirect = false;
@@ -215,7 +276,7 @@ export class ReverseProxyServer {
           const parsedLoc = new URL(location, `http://${rawHost}`);
           if (
             (parsedLoc.hostname === 'localhost' || parsedLoc.hostname === '127.0.0.1') &&
-            (parsedLoc.port === '3000' || (this.oauthPort && parsedLoc.port === String(this.oauthPort)) || !parsedLoc.port) &&
+            (parsedLoc.port === '3000' || parsedLoc.port === String(bridgePort) || !parsedLoc.port) &&
             !parsedLoc.searchParams.has('client_id')
           ) {
             isLocalBridgeRedirect = true;
@@ -227,64 +288,67 @@ export class ReverseProxyServer {
 
         // 2. Outbound OAuth Authorization URL rewriting (e.g. Google, GitHub, Auth0)
         if (!isLocalBridgeRedirect) {
-          const isOAuthRedirect =
-            location.includes('redirect_uri=') ||
-            ((location.includes('/oauth') || location.includes('/authorize') || location.includes('/auth/')) &&
-             !location.includes('localhost') &&
-             !location.includes('127.0.0.1'));
+          if (host && (host.endsWith('.test') || host.endsWith('.local') || this.routes.has(host))) {
+            this.lastOAuthDomain = host;
+          }
 
-          if (isOAuthRedirect) {
-            if (host && (host.endsWith('.test') || host.endsWith('.local') || this.routes.has(host))) {
-              this.lastOAuthDomain = host;
+          // First pass: standard URL parsing
+          try {
+            const parsed = new URL(location);
+            const state = parsed.searchParams.get('state');
+            if (state && targetDomain) {
+              const rawSetCookie = proxyRes.headers['set-cookie'];
+              const cookies = rawSetCookie
+                ? (Array.isArray(rawSetCookie) ? rawSetCookie : [rawSetCookie])
+                : undefined;
+              this.oauthStateCache.set(state, {
+                domain: targetDomain,
+                cookies,
+                timestamp: Date.now(),
+              });
             }
 
-            try {
-              const parsed = new URL(location);
-              const state = parsed.searchParams.get('state');
-              if (state && targetDomain) {
-                const rawSetCookie = proxyRes.headers['set-cookie'];
-                const cookies = rawSetCookie
-                  ? (Array.isArray(rawSetCookie) ? rawSetCookie : [rawSetCookie])
-                  : undefined;
-                this.oauthStateCache.set(state, {
-                  domain: targetDomain,
-                  cookies,
-                  timestamp: Date.now(),
-                });
-              }
-
-              const redirectUri = parsed.searchParams.get('redirect_uri');
-              if (redirectUri) {
-                let rewrittenUri = redirectUri;
-                try {
-                  const parsedRedirect = new URL(redirectUri);
-                  if (
-                    parsedRedirect.hostname.endsWith('.test') ||
-                    parsedRedirect.hostname.endsWith('.local') ||
-                    this.routes.has(parsedRedirect.hostname.toLowerCase())
-                  ) {
-                    rewrittenUri = `http://localhost:${bridgePort}${parsedRedirect.pathname}${parsedRedirect.search}${parsedRedirect.hash}`;
-                  }
-                } catch {
-                  rewrittenUri = redirectUri.replace(
-                    /https?:\/\/[^/]+\.(test|local)/gi,
-                    `http://localhost:${bridgePort}`
-                  );
+            const redirectUri = parsed.searchParams.get('redirect_uri');
+            if (redirectUri) {
+              let rewrittenUri = redirectUri;
+              try {
+                const parsedRedirect = new URL(redirectUri);
+                if (
+                  parsedRedirect.hostname.endsWith('.test') ||
+                  parsedRedirect.hostname.endsWith('.local') ||
+                  this.routes.has(parsedRedirect.hostname.toLowerCase())
+                ) {
+                  rewrittenUri = `http://localhost:${bridgePort}${parsedRedirect.pathname}${parsedRedirect.search}${parsedRedirect.hash}`;
                 }
-
-                if (rewrittenUri !== redirectUri) {
-                  parsed.searchParams.set('redirect_uri', rewrittenUri);
-                  proxyRes.headers['location'] = parsed.toString();
-                }
-              }
-            } catch {
-              if (location.includes('.test') || location.includes('.local')) {
-                proxyRes.headers['location'] = location.replace(
-                  /https?%3A%2F%2F[^%]+?\.(test|local)/gi,
-                  `http%3A%2F%2Flocalhost%3A${bridgePort}`
+              } catch {
+                rewrittenUri = redirectUri.replace(
+                  /https?:\/\/[^/]+\.(test|local)/gi,
+                  `http://localhost:${bridgePort}`
                 );
               }
+
+              if (rewrittenUri !== redirectUri) {
+                parsed.searchParams.set('redirect_uri', rewrittenUri);
+                proxyRes.headers['location'] = parsed.toString();
+              }
             }
+          } catch {}
+
+          // Second pass: Failsafe string rewrite on Location header
+          // Guarantees NO .test or .local remains in redirect_uri or callbackUrl under ANY circumstance
+          const { output: sanitizedLoc, state: extractedState } = sanitizeOAuthString(proxyRes.headers['location'] || location);
+          proxyRes.headers['location'] = sanitizedLoc;
+
+          if (extractedState && targetDomain && !this.oauthStateCache.has(extractedState)) {
+            const rawSetCookie = proxyRes.headers['set-cookie'];
+            const cookies = rawSetCookie
+              ? (Array.isArray(rawSetCookie) ? rawSetCookie : [rawSetCookie])
+              : undefined;
+            this.oauthStateCache.set(extractedState, {
+              domain: targetDomain,
+              cookies,
+              timestamp: Date.now(),
+            });
           }
         }
       }
@@ -309,6 +373,90 @@ export class ReverseProxyServer {
         if (host && host !== 'localhost' && host !== '127.0.0.1') {
           proxyRes.headers['access-control-allow-origin'] = `http://${host}`;
         }
+      }
+
+      // Intercept and rewrite response bodies for Auth requests (e.g. NextAuth React signIn JSON / HTML bodies)
+      if ((req as any)?.__hmSelfHandle && res && !res.writableEnded) {
+        const chunks: Buffer[] = [];
+        proxyRes.on('data', (chunk: Buffer) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+
+        proxyRes.on('end', () => {
+          if (proxyRes.statusCode) {
+            res.statusCode = proxyRes.statusCode;
+          }
+          if (proxyRes.statusMessage) {
+            res.statusMessage = proxyRes.statusMessage;
+          }
+          if (proxyRes.headers['set-cookie']) {
+            res.setHeader('set-cookie', proxyRes.headers['set-cookie']);
+          }
+
+          const bodyBuffer = Buffer.concat(chunks);
+          const rawContentType = (proxyRes.headers['content-type'] || '').toLowerCase();
+          const isTextOrJson =
+            rawContentType.includes('json') ||
+            rawContentType.includes('text') ||
+            rawContentType.includes('javascript') ||
+            rawContentType.includes('xml') ||
+            rawContentType.includes('html');
+
+          // If status is 3xx redirect, ensure location header is propagated and end
+          if (proxyRes.statusCode && proxyRes.statusCode >= 300 && proxyRes.statusCode < 400) {
+            if (proxyRes.headers['location']) {
+              res.setHeader('location', proxyRes.headers['location']);
+            }
+            res.end();
+            return;
+          }
+
+          if (isTextOrJson && bodyBuffer.length > 0) {
+            const encoding = (proxyRes.headers['content-encoding'] || '').toLowerCase();
+            let decompressedBuf = bodyBuffer;
+            try {
+              if (encoding.includes('gzip')) decompressedBuf = zlib.gunzipSync(bodyBuffer);
+              else if (encoding.includes('deflate')) decompressedBuf = zlib.inflateSync(bodyBuffer);
+              else if (encoding.includes('br')) decompressedBuf = zlib.brotliDecompressSync(bodyBuffer);
+            } catch {}
+
+            const bodyStr = decompressedBuf.toString('utf-8');
+            const { output: rewrittenBody, modified, state } = sanitizeOAuthString(bodyStr);
+
+            if (state && targetDomain) {
+              const rawSetCookie = proxyRes.headers['set-cookie'];
+              const cookies = rawSetCookie
+                ? (Array.isArray(rawSetCookie) ? rawSetCookie : [rawSetCookie])
+                : undefined;
+              this.oauthStateCache.set(state, {
+                domain: targetDomain,
+                cookies,
+                timestamp: Date.now(),
+              });
+            }
+
+            if (modified) {
+              const newBuffer = Buffer.from(rewrittenBody, 'utf-8');
+              res.removeHeader('content-encoding');
+              res.setHeader('content-length', Buffer.byteLength(newBuffer));
+              res.end(newBuffer);
+              return;
+            }
+
+            res.end(bodyBuffer);
+            return;
+          }
+
+          res.end(bodyBuffer);
+        });
+
+        proxyRes.on('error', (err: any) => {
+          try {
+            res.destroy(err);
+          } catch {}
+        });
+
+        return;
       }
 
       // Guarantee instant, unbuffered HMR updates (Next.js Fast Refresh, Vite HMR, Turbopack, Astro, Remix SSE):
@@ -1180,7 +1328,22 @@ export class ReverseProxyServer {
 
       const targetPort = this.resolveLocalhostTarget(req);
       if (targetPort) {
-        this.proxy.web(req, res, { target: `http://127.0.0.1:${targetPort}` });
+        const isAuthReq =
+          url.startsWith('/api/auth') ||
+          url.startsWith('/auth') ||
+          url.includes('/api/auth/') ||
+          url.includes('/auth/') ||
+          url.includes('/auth/callback') ||
+          url.includes('/auth/signin') ||
+          url.includes('/oauth');
+        if (isAuthReq) {
+          (req as any).__hmSelfHandle = true;
+          delete req.headers['accept-encoding'];
+        }
+        this.proxy.web(req, res, {
+          target: `http://127.0.0.1:${targetPort}`,
+          selfHandleResponse: isAuthReq,
+        });
         return;
       }
 
@@ -1207,8 +1370,15 @@ export class ReverseProxyServer {
         url.startsWith('/api/auth') ||
         url.startsWith('/auth') ||
         url.includes('/api/auth/') ||
+        url.includes('/auth/') ||
         url.includes('/auth/callback') ||
-        url.includes('/auth/signin');
+        url.includes('/auth/signin') ||
+        url.includes('/auth/login') ||
+        url.includes('/oauth') ||
+        url.includes('/signin') ||
+        url.includes('/login') ||
+        url.includes('/callback') ||
+        req.headers['x-auth-return-redirect'] !== undefined;
 
       const bridgeHost = `localhost:${this.oauthPort || 3000}`;
 
@@ -1217,6 +1387,8 @@ export class ReverseProxyServer {
         req.headers['x-forwarded-host'] = bridgeHost;
         req.headers['x-forwarded-proto'] = 'http';
         req.headers['x-forwarded-port'] = String(this.oauthPort || 3000);
+        delete req.headers['accept-encoding'];
+        (req as any).__hmSelfHandle = true;
 
         // Mirror cookies so frameworks expecting __Secure- or standard names both find their cookies:
         if (req.headers.cookie) {
@@ -1287,6 +1459,7 @@ export class ReverseProxyServer {
 
       this.proxy.web(req, res, {
         target: `http://127.0.0.1:${targetPort}`,
+        selfHandleResponse: isAuthRequest,
       });
     } else {
       res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
